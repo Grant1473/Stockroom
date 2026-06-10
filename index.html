@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stockroom Jobs</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232dd4bf'/><text x='50%%' y='55%%' dominant-baseline='middle' text-anchor='middle' fill='%23102029' font-size='18' font-weight='800'>S</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div>
+          <strong>Stockroom</strong>
+          <span>Jobs + Materials</span>
+        </div>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-item active" data-view="dashboard" type="button"><span class="nav-icon">▦</span>Dashboard</button>
+        <button class="nav-item" data-view="products" type="button"><span class="nav-icon">□</span>Products</button>
+        <button class="nav-item" data-view="materials" type="button"><span class="nav-icon">◇</span>Materials</button>
+        <button class="nav-item" data-view="workboard" type="button"><span class="nav-icon">✓</span>Workboard</button>
+        <button class="nav-item" data-view="jobbuilds" type="button"><span class="nav-icon">▣</span>Job Builds</button>
+        <button class="nav-item" data-view="orders" type="button"><span class="nav-icon">≡</span>Orders</button>
+      </nav>
+
+      <div class="sidebar-panel">
+        <span class="panel-label">Ready</span>
+        <strong id="today-sales">0</strong>
+        <small>jobs ready to ship</small>
+      </div>
+
+      <button class="settings-btn" id="settings-btn" type="button" title="Settings">⚙ Settings</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Operations Desk</p>
+          <h1 id="page-title">Inventory Dashboard</h1>
+        </div>
+        <div class="topbar-actions">
+          <label class="search">
+            <span>⌕</span>
+            <input id="global-search" type="search" placeholder="Search products, materials, jobs">
+          </label>
+          <span class="sync-indicator" id="sync-indicator" title="Sync status">○ Offline</span>
+
+        </div>
+      </header>
+
+      <section class="view active" id="dashboard-view" aria-labelledby="dashboard-title">
+        <div class="stats-bar" id="stats-bar"></div>
+
+        <div class="dashboard-layout">
+          <section class="panel wide">
+            <div class="panel-head">
+              <div>
+                <h2 id="dashboard-title">Job Queue</h2>
+                <p>Live work from new order to ready to ship.</p>
+              </div>
+              <button class="text-button" data-view-shortcut="workboard" type="button">View workboard</button>
+            </div>
+            <div class="order-flow" id="order-flow"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Material Check</h2>
+                <p>Materials at or below threshold.</p>
+              </div>
+            </div>
+            <div class="alert-list" id="stock-alerts"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="products-view" aria-labelledby="products-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="products-title">Products</h2>
+            <p>Finished-product inventory.</p>
+          </div>
+          <button class="primary-button" id="add-product-row-btn" type="button">Add Row</button>
+        </div>
+        <section class="panel sheet-panel">
+          <div id="product-list-container"></div>
+        </section>
+      </section>
+
+      <section class="view" id="materials-view" aria-labelledby="materials-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="materials-title">Raw Materials</h2>
+            <p>Small sheet for wood inventory.</p>
+          </div>
+          <button class="primary-button" id="add-material-row-btn" type="button">Add Row</button>
+        </div>
+        <section class="panel sheet-panel">
+          <div class="sheet-wrap">
+            <table class="material-sheet">
+              <thead>
+                <tr>
+                  <th>Name of Wood</th>
+                  <th>Thickness</th>
+                  <th>Type</th>
+                  <th>Qty</th>
+                  <th>Low Stock Threshold</th>
+                </tr>
+              </thead>
+              <tbody id="material-sheet-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="workboard-view" aria-labelledby="workboard-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="workboard-title">Product Workboard</h2>
+            <p>All product jobs move through new order, production, hangout, and ready to ship.</p>
+          </div>
+        </div>
+        <section class="task-board" id="task-board"></section>
+      </section>
+
+      <section class="view" id="orders-view" aria-labelledby="orders-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="orders-title">Orders</h2>
+            <p>Choose a product and add order details.</p>
+          </div>
+          <button class="text-button" id="toggle-order-form-btn" type="button">+ New Order</button>
+        </div>
+
+        <section class="panel" id="order-form-panel" style="display:none;">
+          <div class="order-form">
+            <div class="order-form-row">
+              <label>
+                <span>Order number</span>
+                <input id="order-number" placeholder="e.g. 1001">
+              </label>
+              <label>
+                <span>Product</span>
+                <select id="order-product-select"></select>
+              </label>
+              <label>
+                <span>Qty</span>
+                <input id="order-qty" min="1" type="number" value="1">
+              </label>
+              <label>
+                <span>Stain type</span>
+                <input id="order-stain-type">
+              </label>
+            </div>
+            <div class="order-form-row">
+              <label class="order-customizations-label">
+                <span>Customizations</span>
+                <textarea id="order-customizations" rows="2" placeholder="Size, finish, edge, notes"></textarea>
+              </label>
+            </div>
+            <button class="primary-button" id="create-order-btn" type="button">Create Order</button>
+          </div>
+        </section>
+
+        <div class="order-table-header">
+          <span id="order-count" class="order-count">0 orders</span>
+          <div class="order-table-actions">
+            <button class="text-button" id="import-excel-btn" type="button">Import Excel</button>
+            <input type="file" id="excel-file-input" accept=".xlsx,.xls" style="display:none">
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Stain</th>
+                  <th>Customizations</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="orders-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="jobbuilds-view" aria-labelledby="jobbuilds-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="jobbuilds-title">Job Builds</h2>
+            <p>Grouped tasks and orders by job build number.</p>
+          </div>
+          <button class="primary-button" id="create-build-btn" type="button">+ New Job Build</button>
+        </div>
+        <section class="job-build-grid" id="job-build-list"></section>
+      </section>
+
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <div class="side-panel-backdrop" id="side-panel-backdrop"></div>
+  <aside class="side-panel" id="product-detail-panel">
+    <div class="side-panel-header">
+      <h2 id="detail-product-name"></h2>
+      <button class="close-button" id="close-detail-panel" type="button">✕</button>
+    </div>
+    <div class="side-panel-content">
+      <div class="detail-section">
+        <label>Name</label>
+        <p id="detail-name"></p>
+      </div>
+      <div class="detail-section">
+        <label>Summary</label>
+        <div id="detail-materials-chips" class="chips-list"></div>
+      </div>
+      <div class="detail-section">
+        <label>Quantity / Count</label>
+        <p id="detail-qty"></p>
+      </div>
+      <div class="detail-section">
+        <label>Build Specs</label>
+        <p id="detail-specs" style="white-space:pre-wrap;font-size:13px;color:var(--text-muted);"></p>
+      </div>
+      <div class="detail-section">
+        <h3>Related Orders</h3>
+        <div id="detail-orders-list" class="orders-list"></div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="side-panel-backdrop" id="new-build-backdrop"></div>
+  <aside class="side-panel" id="new-build-panel">
+    <div class="side-panel-header">
+      <h2>New Job Build</h2>
+      <button class="close-button" id="close-new-build" type="button">✕</button>
+    </div>
+    <div class="side-panel-content">
+      <div class="detail-section">
+        <h3>Select Orders for Build</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">The build name is auto-generated from product + qty.</p>
+        <div id="new-build-order-list" class="orders-list" style="max-height:50vh;overflow-y:auto;"></div>
+      </div>
+      <button class="primary-button" id="confirm-create-build" type="button" style="width:100%;">Create Build</button>
+    </div>
+  </aside>
+
+  <div class="settings-backdrop" id="settings-backdrop"></div>
+  <aside class="settings-panel" id="settings-panel">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button class="close-button" id="close-settings" type="button">✕</button>
+    </div>
+    <div class="settings-content">
+      <div class="settings-section">
+        <h3>Supabase Connection</h3>
+        <p>Link your Supabase project to persist data across sessions.</p>
+        <label>
+          <span>Project URL</span>
+          <input id="supabase-url" type="url" placeholder="https://xxxxxxxxxxxx.supabase.co">
+        </label>
+        <label>
+          <span>Anon / Public Key</span>
+          <input id="supabase-key" type="password" placeholder="eyJhbGciOiJIUzI1NiIs...">
+        </label>
+        <div class="settings-actions">
+          <button class="primary-button" id="save-supabase-btn" type="button">Save & Connect</button>
+          <button class="text-button" id="clear-supabase-btn" type="button">Disconnect</button>
+        </div>
+        <p class="settings-hint" id="settings-hint">Enter your Supabase project URL and anon key, then click Save.</p>
+      </div>
+    </div>
+  </aside>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
