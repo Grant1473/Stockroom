@@ -6,6 +6,13 @@ const url = require("url");
 const XLSX = require("xlsx");
 
 const PORT = 5500;
+
+// ── Supabase Configuration ──────────────────────────────────────
+// Set SUPABASE_URL and SUPABASE_KEY as environment variables,
+// or they'll be read from excel-config.json
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
 const MIME = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -15,7 +22,16 @@ const MIME = {
 const CONFIG_PATH = path.join(__dirname, "excel-config.json");
 
 function readConfig() {
-  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")); } catch { return { excelPath: "", supabaseUrl: "", supabaseKey: "" }; }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    return {
+      supabaseUrl: SUPABASE_URL || cfg.supabaseUrl || "https://kfcdgafhzcdddwhknult.supabase.co",
+      supabaseKey: SUPABASE_KEY || cfg.supabaseKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmY2RnYWZoemNkZGR3aGtudWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTE2OTUsImV4cCI6MjA5NTU2NzY5NX0.KduXGxt-w9Wk6slJG5AIoM2seCZCRtDqvMXTAsCvAZM",
+      excelPath: cfg.excelPath || ""
+    };
+  } catch {
+    return { supabaseUrl: SUPABASE_URL || "https://kfcdgafhzcdddwhknult.supabase.co", supabaseKey: SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmY2RnYWZoemNkZGR3aGtudWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTE2OTUsImV4cCI6MjA5NTU2NzY5NX0.KduXGxt-w9Wk6slJG5AIoM2seCZCRtDqvMXTAsCvAZM", excelPath: "" };
+  }
 }
 
 function writeConfig(cfg) {
@@ -54,8 +70,7 @@ function supabaseFetch(url, options) {
     const opts = {
       hostname: u.hostname,
       path: u.pathname + u.search,
-      method: options.method || "POST",
-      headers: options.headers || {}
+      method: options.method || "POST"
     };
     const req = https.request(opts, (res) => {
       let data = "";
@@ -64,6 +79,11 @@ function supabaseFetch(url, options) {
     });
     req.on("error", reject);
     if (options.body) req.write(options.body);
+    if (options.headers) {
+      Object.keys(options.headers).forEach(key => {
+        req.setHeader(key, options.headers[key]);
+      });
+    }
     req.end();
   });
 }

@@ -9,6 +9,8 @@ let syncReady = false;
 let _idCounter = 0;
 let currentUser = null;
 let openEditorIds = new Set();
+let supabaseReconnectTimer = null;
+let loginScreenCheckTimer = null;
 
 const jobStages = ["New Order", "In Production", "In Hangout", "Ready To Ship"];
 const materialTypes = ["", "Hardwood", "Plywood", "MDF", "Other"];
@@ -55,7 +57,10 @@ function applyPermissions() {
 }
 
 async function login(username, password) {
-  if (!isConnected()) throw new Error("Configure Supabase URL and key in Settings first");
+  if (!isConnected()) {
+    const reconnected = await ensureSupabaseConnection();
+    if (!reconnected) throw new Error("Configure Supabase URL and key in Settings first");
+  }
   let rows;
   try {
     rows = await supabaseRequest("users", {
@@ -69,10 +74,13 @@ async function login(username, password) {
   el("#login-overlay").classList.add("hidden");
   applyPermissions();
   if (!isReady) { isReady = true; initApp(); }
+  startSupabaseReconnection();
 }
 
 function logout() {
   clearSession();
+  if (supabaseReconnectTimer) clearTimeout(supabaseReconnectTimer);
+  supabaseReconnectTimer = null;
   el("#login-overlay").classList.remove("hidden");
   el("#login-username").value = "";
   el("#login-password").value = "";
@@ -1293,6 +1301,25 @@ el("#login-form").addEventListener("submit", async (e) => {
   btn.textContent = "Sign In";
 });
 
+function startLoginScreenConnectionCheck() {
+  if (loginScreenCheckTimer) clearTimeout(loginScreenCheckTimer);
+  loginScreenCheckTimer = setTimeout(async () => {
+    await checkLoginScreenConnection();
+    startLoginScreenConnectionCheck();
+  }, 10000);
+}
+
+function checkAndReconnect() {
+  if (!currentUser) return;
+  ensureSupabaseConnection().then(reconnected => {
+    if (reconnected) {
+      loadFromSupabase().catch(() => {
+        setSyncStatus("Auto-load failed");
+      });
+    }
+  });
+}
+
 el("#logout-btn").addEventListener("click", logout);
 
 el("#settings-btn").addEventListener("click", () => {
@@ -1480,6 +1507,9 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+const DEFAULT_SUPABASE_URL = "https://kfcdgafhzcdddwhknult.supabase.co";
+const DEFAULT_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmY2RnYWZoemNkZGR3aGtudWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTE2OTUsImV4cCI6MjA5NTU2NzY5NX0.KduXGxt-w9Wk6slJG5AIoM2seCZCRtDqvMXTAsCvAZM";
+
 async function loadSupabaseConfig() {
   try {
     const res = await fetch("/api/supabase-config");
@@ -1487,8 +1517,41 @@ async function loadSupabaseConfig() {
     if (data.url && data.key) {
       supabaseConfig.url = data.url.replace(/\/$/, "");
       supabaseConfig.key = data.key;
+      return true;
     }
   } catch {}
+  supabaseConfig.url = DEFAULT_SUPABASE_URL;
+  supabaseConfig.key = DEFAULT_SUPABASE_KEY;
+  return true;
+}
+
+async function ensureSupabaseConnection() {
+  if (!isConnected()) {
+    const success = await loadSupabaseConfig();
+    if (success) {
+      setSyncStatus("Reconnected");
+    }
+    return success;
+  }
+  return true;
+}
+
+function startSupabaseReconnection() {
+  if (supabaseReconnectTimer) clearTimeout(supabaseReconnectTimer);
+  supabaseReconnectTimer = setTimeout(async () => {
+    await checkAndReconnect();
+    startSupabaseReconnection();
+  }, 30000);
+}
+
+async function checkLoginScreenConnection() {
+  const connected = await ensureSupabaseConnection();
+  const syncIndicator = el("#login-sync-indicator");
+  if (syncIndicator) {
+    syncIndicator.textContent = connected ? "● Online" : "○ Offline";
+    syncIndicator.title = connected ? "Connected to Supabase" : "Not connected to Supabase";
+  }
+  return connected;
 }
 
 function initApp() {
@@ -1504,7 +1567,8 @@ function initApp() {
   }
 }
 
-loadSupabaseConfig().then(() => {
+async function initializeApp() {
+  const connected = await loadSupabaseConfig();
   loadSession();
   setSyncStatus(isConnected() ? "Connected" : "Not connected");
   if (currentUser) {
@@ -1512,7 +1576,12 @@ loadSupabaseConfig().then(() => {
     applyPermissions();
     isReady = true;
     initApp();
+    startSupabaseReconnection();
   } else {
     el("#login-overlay").classList.remove("hidden");
+    await checkLoginScreenConnection();
+    startLoginScreenConnectionCheck();
   }
-});
+}
+
+initializeApp();
