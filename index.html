@@ -8,6 +8,32 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-card">
+      <div class="brand" style="margin-bottom:24px;">
+        <div class="brand-mark">S</div>
+        <div>
+          <strong>Stockroom</strong>
+          <span>Sign in to continue</span>
+        </div>
+      </div>
+      <form id="login-form" autocomplete="off">
+        <label>
+          <span>Username</span>
+          <input id="login-username" type="text" placeholder="Enter username" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="login-password" type="password" placeholder="Enter password" required>
+        </label>
+        <p class="login-error" id="login-error"></p>
+        <button class="primary-button" id="login-btn" type="submit" style="width:100%;">Sign In</button>
+      </form>
+      <span class="sync-indicator" id="login-sync-indicator" style="justify-content:center;margin-top:12px;" title="Sync status">○ Offline</span>
+      <button class="text-button logout-btn" id="logout-btn" type="button" style="display:none;">Sign Out</button>
+    </div>
+  </div>
+
   <div class="app-shell">
     <aside class="sidebar" aria-label="Main navigation">
       <div class="brand">
@@ -25,6 +51,7 @@
         <button class="nav-item" data-view="workboard" type="button"><span class="nav-icon">✓</span>Workboard</button>
         <button class="nav-item" data-view="jobbuilds" type="button"><span class="nav-icon">▣</span>Job Builds</button>
         <button class="nav-item" data-view="orders" type="button"><span class="nav-icon">≡</span>Orders</button>
+        <button class="nav-item" data-view="permissions" type="button"><span class="nav-icon">◉</span>Permissions</button>
       </nav>
 
       <div class="sidebar-panel">
@@ -43,10 +70,6 @@
           <h1 id="page-title">Inventory Dashboard</h1>
         </div>
         <div class="topbar-actions">
-          <label class="search">
-            <span>⌕</span>
-            <input id="global-search" type="search" placeholder="Search products, materials, jobs">
-          </label>
           <span class="sync-indicator" id="sync-indicator" title="Sync status">○ Offline</span>
 
         </div>
@@ -153,8 +176,40 @@
                 <input id="order-qty" min="1" type="number" value="1">
               </label>
               <label>
-                <span>Stain type</span>
+                <span>Stain</span>
                 <input id="order-stain-type">
+              </label>
+            </div>
+            <div class="order-form-row">
+              <label>
+                <span>Order Date</span>
+                <input id="order-date" type="date">
+              </label>
+              <label>
+                <span>Ship Date</span>
+                <input id="order-ship-date" type="date">
+              </label>
+              <label>
+                <span>Cover</span>
+                <input id="order-cover" placeholder="Cover type">
+              </label>
+              <label>
+                <span>Plaque</span>
+                <input id="order-plaque" placeholder="Plaque text">
+              </label>
+            </div>
+            <div class="order-form-row">
+              <label>
+                <span>P.O</span>
+                <input id="order-po" placeholder="Purchase order #">
+              </label>
+              <label>
+                <span>Retailer</span>
+                <input id="order-retailer" placeholder="Retailer name">
+              </label>
+              <label>
+                <span>Ship To</span>
+                <input id="order-ship-to" placeholder="Shipping address">
               </label>
             </div>
             <div class="order-form-row">
@@ -170,22 +225,26 @@
         <div class="order-table-header">
           <span id="order-count" class="order-count">0 orders</span>
           <div class="order-table-actions">
-            <button class="text-button" id="import-excel-btn" type="button">Import Excel</button>
-            <input type="file" id="excel-file-input" accept=".xlsx,.xls" style="display:none">
           </div>
         </div>
 
         <section class="panel">
-          <div class="table-wrap">
-            <table>
+          <div class="table-wrap orders-table-wrap">
+            <table id="orders-data-table">
               <thead>
                 <tr>
-                  <th>Order #</th>
-                  <th>Product</th>
-                  <th>Qty</th>
-                  <th>Stain</th>
-                  <th>Customizations</th>
-                  <th></th>
+                  <th class="col-orderNo" data-col="orderNo">Order #<span class="resize-handle"></span></th>
+                  <th class="col-product" data-col="product">Product<span class="resize-handle"></span></th>
+                  <th class="col-qty" data-col="qty">Qty<span class="resize-handle"></span></th>
+                  <th class="col-stain" data-col="stain">Stain<span class="resize-handle"></span></th>
+                  <th class="col-orderDate" data-col="orderDate">Order Date<span class="resize-handle"></span></th>
+                  <th class="col-shipDate" data-col="shipDate">Ship Date<span class="resize-handle"></span></th>
+                  <th class="col-cover" data-col="cover">Cover<span class="resize-handle"></span></th>
+                  <th class="col-plaque" data-col="plaque">Plaque<span class="resize-handle"></span></th>
+                  <th class="col-po" data-col="po">P.O<span class="resize-handle"></span></th>
+                  <th class="col-retailer" data-col="retailer">Retailer<span class="resize-handle"></span></th>
+                  <th class="col-shipTo" data-col="shipTo">Ship To<span class="resize-handle"></span></th>
+                  <th class="col-customizations" data-col="customizations">Customizations<span class="resize-handle"></span></th>
                 </tr>
               </thead>
               <tbody id="orders-table"></tbody>
@@ -203,6 +262,61 @@
           <button class="primary-button" id="create-build-btn" type="button">+ New Job Build</button>
         </div>
         <section class="job-build-grid" id="job-build-list"></section>
+      </section>
+
+      <section class="view" id="permissions-view" aria-labelledby="permissions-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="permissions-title">Permissions</h2>
+            <p>Manage users and their access to tabs.</p>
+          </div>
+          <button class="primary-button" id="add-user-btn" type="button">+ Add User</button>
+        </div>
+        <section class="panel">
+          <div class="table-wrap">
+            <table class="permissions-table" id="permissions-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Password</th>
+                  <th data-col="dashboard">Dashboard</th>
+                  <th data-col="products">Products</th>
+                  <th data-col="materials">Materials</th>
+                  <th data-col="workboard">Workboard</th>
+                  <th data-col="jobbuilds">Job Builds</th>
+                  <th data-col="orders">Orders</th>
+                  <th data-col="permissions">Permissions</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="permissions-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+        <div class="settings-section" id="add-user-form" style="display:none;margin-top:16px;">
+          <h3>New User</h3>
+          <label>
+            <span>Username</span>
+            <input id="new-user-username" type="text" placeholder="Username">
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="new-user-password" type="password" placeholder="Password">
+          </label>
+          <div class="chips-list" id="new-user-tabs">
+            <label class="chip"><input type="checkbox" value="dashboard" checked> Dashboard</label>
+            <label class="chip"><input type="checkbox" value="products" checked> Products</label>
+            <label class="chip"><input type="checkbox" value="materials" checked> Materials</label>
+            <label class="chip"><input type="checkbox" value="workboard" checked> Workboard</label>
+            <label class="chip"><input type="checkbox" value="jobbuilds" checked> Job Builds</label>
+            <label class="chip"><input type="checkbox" value="orders" checked> Orders</label>
+            <label class="chip"><input type="checkbox" value="permissions"> Permissions</label>
+          </div>
+          <div class="settings-actions">
+            <button class="primary-button" id="save-new-user-btn" type="button">Save User</button>
+            <button class="text-button" id="cancel-new-user-btn" type="button">Cancel</button>
+          </div>
+        </div>
       </section>
 
     </main>
@@ -233,9 +347,14 @@
         <label>Build Specs</label>
         <p id="detail-specs" style="white-space:pre-wrap;font-size:13px;color:var(--text-muted);"></p>
       </div>
-      <div class="detail-section">
+      <div class="detail-section" id="detail-orders-section">
         <h3>Related Orders</h3>
         <div id="detail-orders-list" class="orders-list"></div>
+      </div>
+      <div class="detail-section" id="detail-notes-section" style="display:none;">
+        <h3>Notes</h3>
+        <textarea id="detail-order-notes" class="notes-textarea" placeholder="Add notes about this order..." style="width:100%;min-height:80px;resize:vertical;"></textarea>
+        <button id="save-order-notes" class="primary-button" type="button" style="margin-top:8px;width:100%;">Save Notes</button>
       </div>
     </div>
   </aside>
@@ -262,28 +381,13 @@
       <h2>Settings</h2>
       <button class="close-button" id="close-settings" type="button">✕</button>
     </div>
-    <div class="settings-content">
-      <div class="settings-section">
-        <h3>Supabase Connection</h3>
-        <p>Link your Supabase project to persist data across sessions.</p>
-        <label>
-          <span>Project URL</span>
-          <input id="supabase-url" type="url" placeholder="https://xxxxxxxxxxxx.supabase.co">
-        </label>
-        <label>
-          <span>Anon / Public Key</span>
-          <input id="supabase-key" type="password" placeholder="eyJhbGciOiJIUzI1NiIs...">
-        </label>
-        <div class="settings-actions">
-          <button class="primary-button" id="save-supabase-btn" type="button">Save & Connect</button>
-          <button class="text-button" id="clear-supabase-btn" type="button">Disconnect</button>
-        </div>
-        <p class="settings-hint" id="settings-hint">Enter your Supabase project URL and anon key, then click Save.</p>
-      </div>
+    <div class="settings-user-bar" id="settings-user-bar">
+      <span id="settings-user-name"></span>
+      <button class="text-button" id="settings-signout-btn" type="button">Sign Out</button>
     </div>
+    <div class="settings-content"></div>
   </aside>
 
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

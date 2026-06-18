@@ -1,3 +1,27 @@
+/* ── Login overlay ─────────────────────────────────────────── */
+.login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--backdrop);
+}
+.login-overlay.hidden { display: none; }
+.login-card {
+  background: var(--paper); border-radius: 12px;
+  padding: 32px; width: 340px; max-width: 90vw;
+  box-shadow: var(--shadow);
+}
+.login-card form { display: flex; flex-direction: column; gap: 12px; }
+.login-card label { display: flex; flex-direction: column; gap: 4px; }
+.login-card label span { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.login-card input { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+.login-error { color: var(--coral); font-size: 13px; margin: 0; min-height: 18px; }
+.logout-btn { margin-top: 12px; width: 100%; text-align: center; }
+/* ── Permissions table ────────────────────────────────────── */
+.permissions-table th[data-col] { cursor: pointer; white-space: nowrap; }
+.permissions-table th[data-col] input[type="checkbox"] { margin: 0; }
+.settings-user { font-size: 13px; color: var(--muted); }
+.settings-user-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+
 :root {
   color-scheme: light;
   --ink: #20242c;
@@ -500,11 +524,71 @@ th {
   padding: 32px 10px !important;
 }
 
-.order-customizations-cell {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.orders-table-wrap {
+  overflow-x: auto;
+}
+
+#orders-data-table {
+  width: max-content;
+  min-width: 100%;
+}
+
+#orders-data-table th,
+#orders-data-table td {
+  padding: 10px 8px;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
+
+#orders-data-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--backdrop);
+  z-index: 2;
+  user-select: none;
   white-space: nowrap;
+}
+
+#orders-data-table tbody tr:nth-child(even) {
+  background: var(--paper);
+}
+
+#orders-data-table tbody tr:nth-child(odd) {
+  background: #fafbfc;
+}
+
+#orders-data-table tbody tr:hover {
+  background: #eef6f5;
+}
+
+#orders-data-table .col-orderNo { width: 100px; min-width: 60px; }
+#orders-data-table .col-product { width: 140px; min-width: 80px; }
+#orders-data-table .col-qty { width: 60px; min-width: 40px; }
+#orders-data-table .col-stain { width: 100px; min-width: 60px; }
+#orders-data-table .col-orderDate { width: 110px; min-width: 70px; }
+#orders-data-table .col-shipDate { width: 110px; min-width: 70px; }
+#orders-data-table .col-cover { width: 100px; min-width: 60px; }
+#orders-data-table .col-plaque { width: 100px; min-width: 60px; }
+#orders-data-table .col-po { width: 100px; min-width: 60px; }
+#orders-data-table .col-retailer { width: 120px; min-width: 70px; }
+#orders-data-table .col-shipTo { width: 140px; min-width: 80px; }
+#orders-data-table .col-customizations { width: 200px; min-width: 100px; }
+
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 1;
+}
+
+.resize-handle:hover {
+  background: var(--teal);
 }
 
 .build-order-row {
@@ -621,6 +705,8 @@ th {
 .alert-list {
   display: grid;
   gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .alert-item {
@@ -1766,6 +1852,17 @@ th {
 .order-detail-info strong {
   color: var(--ink);
 }
+
+.stage-group { margin-bottom: 8px; }
+.stage-head { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+.stage-head.stage-done { color: var(--teal); }
+.stage-head.stage-done::after { content: " ✓"; }
+.task-item { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; cursor: pointer; }
+.task-item input { margin: 0; }
+.task-done { text-decoration: line-through; color: var(--muted); }
+.add-task-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+.add-task-row input { flex: 1; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+.add-task-row select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
 
 @media (max-width: 768px) {
   .side-panel {

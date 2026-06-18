@@ -1,29 +1,83 @@
-let products = [{ id: 1, name: "", qtyMade: "", selectedMaterials: [] }];
+let products = [{ id: 1, name: "", qtyMade: "", selectedMaterials: [], buildSpecs: [] }];
 let materials = [{ id: 1, woodName: "", thickness: "", type: "", qty: "", lowStockThreshold: "" }];
 let jobs = [];
 let orders = [];
 let jobBuilds = [];
-let supabaseConfig = {
-  url: localStorage.getItem("stockroom_supabase_url") || "",
-  key: localStorage.getItem("stockroom_supabase_key") || ""
-};
+let supabaseConfig = { url: "", key: "" };
 let autoSaveTimers = new Map();
 let syncReady = false;
 let _idCounter = 0;
+let currentUser = null;
+let openEditorIds = new Set();
+
 const jobStages = ["New Order", "In Production", "In Hangout", "Ready To Ship"];
-const materialTypes = ["", "Hardwood", "Plywood", "MDF"];
+const materialTypes = ["", "Hardwood", "Plywood", "MDF", "Other"];
+const allTabs = ["dashboard", "products", "materials", "workboard", "jobbuilds", "orders", "permissions"];
 const titleMap = {
   dashboard: "Inventory Dashboard",
   products: "Products",
   materials: "Raw Materials",
   workboard: "Product Workboard",
   jobbuilds: "Job Builds",
-  orders: "Orders"
+  orders: "Orders",
+  permissions: "Permissions"
 };
 
 const el = (selector) => document.querySelector(selector);
 const els = (selector) => [...document.querySelectorAll(selector)];
 const isConnected = () => supabaseConfig.url && supabaseConfig.key;
+
+let isReady = false;
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem("stockroom_user");
+    if (raw) currentUser = JSON.parse(raw);
+  } catch { currentUser = null; }
+}
+
+function saveSession(user) {
+  currentUser = user;
+  localStorage.setItem("stockroom_user", JSON.stringify(user));
+}
+
+function clearSession() {
+  currentUser = null;
+  localStorage.removeItem("stockroom_user");
+}
+
+function applyPermissions() {
+  if (!currentUser) return;
+  els(".nav-item").forEach(btn => {
+    const view = btn.dataset.view;
+    btn.style.display = currentUser.tabs.includes(view) ? "" : "none";
+  });
+}
+
+async function login(username, password) {
+  if (!isConnected()) throw new Error("Configure Supabase URL and key in Settings first");
+  let rows;
+  try {
+    rows = await supabaseRequest("users", {
+      params: `?username=ilike.${encodeURIComponent(username)}&password=eq.${encodeURIComponent(password)}&select=username,tabs`
+    });
+  } catch (e) {
+    throw new Error("Supabase error: " + e.message);
+  }
+  if (!rows || !rows.length) throw new Error("Invalid username or password");
+  saveSession(rows[0]);
+  el("#login-overlay").classList.add("hidden");
+  applyPermissions();
+  if (!isReady) { isReady = true; initApp(); }
+}
+
+function logout() {
+  clearSession();
+  el("#login-overlay").classList.remove("hidden");
+  el("#login-username").value = "";
+  el("#login-password").value = "";
+  el("#login-error").textContent = "";
+}
 
 function uniqueId() {
   return Date.now() + (++_idCounter % 1000);
@@ -45,27 +99,17 @@ function formatDate(value) {
 }
 
 function visibleProducts() {
-  const query = el("#global-search").value.trim().toLowerCase();
-  if (!query) return products;
-  return products.filter((product) => {
-    const materialNames = product.selectedMaterials
-      .map(sm => {
-        const material = materials.find(m => m.id === sm.materialId);
-        return material ? material.woodName : "";
-      })
-      .join(" ");
-    return `${product.name} ${product.qtyMade} ${materialNames}`.toLowerCase().includes(query);
-  });
+  return products;
 }
 
 function setSyncStatus(message) {
-  const indicator = el("#sync-indicator");
-  if (!indicator) return;
-  indicator.textContent = message;
-  indicator.className = "sync-indicator";
-  if (message === "Auto-sync on" || message === "Connected") indicator.classList.add("synced");
-  else if (message === "Saving..." || message === "Saving soon..." || message === "Loading...") indicator.classList.add("saving");
-  else if (message?.includes("fail") || message?.includes("error") || message?.includes("Error")) indicator.classList.add("error");
+  document.querySelectorAll(".sync-indicator").forEach(indicator => {
+    indicator.textContent = message;
+    indicator.className = "sync-indicator";
+    if (message === "Auto-sync on" || message === "Connected") indicator.classList.add("synced");
+    else if (message === "Saving..." || message === "Saving soon..." || message === "Loading...") indicator.classList.add("saving");
+    else if (message?.includes("fail") || message?.includes("error") || message?.includes("Error")) indicator.classList.add("error");
+  });
 }
 
 function cleanSupabaseUrl() {
@@ -105,7 +149,7 @@ function productToDb(product) {
     name: product.name,
     materials_needed: JSON.stringify(product.selectedMaterials || []),
     qty_made: product.qtyMade || "",
-    build_specs: product.buildSpecs || ""
+    build_specs: JSON.stringify(product.buildSpecs || [])
   };
 }
 
@@ -129,20 +173,28 @@ function jobToDb(job) {
   };
 }
 
+function getLocalOrderMeta(orderNumber) {
+  try { return JSON.parse(localStorage.getItem("order_meta") || "{}")[orderNumber]; } catch { return null; }
+}
+function setLocalOrderMeta(orderNumber, data) {
+  try { const m = JSON.parse(localStorage.getItem("order_meta") || "{}"); m[orderNumber] = { ...m[orderNumber], ...data }; localStorage.setItem("order_meta", JSON.stringify(m)); } catch {}
+}
+
 function orderToDb(order) {
   return {
-    id: order.id,
     order_number: order.orderNumber || "",
-    product_id: order.productId,
-    product_name: order.productName,
-    material_id: order.materialId || null,
-    material_name: order.materialName || "",
+    order_date: order.orderDate || "",
+    ship_date: order.shipDate || "",
     qty: order.qty || "1",
-    job_build_number: order.jobBuildNumber || "",
-    stain_type: order.stainType || "",
+    product: order.productName || "",
+    stain_color: order.stainType || "",
+    cover: order.cover || "",
+    plaque: order.plaque || "",
     customizations: order.customizations || "",
-    status: order.status,
-    stage: order.stage || "New Order"
+    po: order.po || "",
+    retailer: order.retailer || "",
+    ship_to: order.shipTo || "",
+    build_specs: JSON.stringify(order.buildSpecs || [])
   };
 }
 
@@ -157,17 +209,15 @@ function jobBuildToDb(build) {
 
 function dbToProduct(row) {
   let selectedMaterials = [];
-  try {
-    selectedMaterials = JSON.parse(row.materials_needed || "[]");
-  } catch (e) {
-    selectedMaterials = [];
-  }
+  try { selectedMaterials = JSON.parse(row.materials_needed || "[]"); } catch { selectedMaterials = []; }
+  let buildSpecs = [];
+  try { const p = JSON.parse(row.build_specs || "[]"); buildSpecs = Array.isArray(p) ? p : []; } catch { buildSpecs = []; }
   return {
     id: Number(row.id),
     name: row.name || "",
     qtyMade: row.qty_made || "",
     selectedMaterials: Array.isArray(selectedMaterials) ? selectedMaterials : [],
-    buildSpecs: row.build_specs || ""
+    buildSpecs
   };
 }
 
@@ -191,20 +241,42 @@ function dbToJob(row) {
   };
 }
 
+function excelSerialToDateStr(val) {
+  if (!val) return "";
+  const num = Number(val);
+  if (Number.isNaN(num)) return val;
+  const d = new Date(Math.round(num - 25569) * 86400000);
+  if (isNaN(d.getTime())) return val;
+  const mo = String(d.getUTCMonth() + 1);
+  const da = String(d.getUTCDate());
+  const yr = String(d.getUTCFullYear()).slice(-2);
+  return mo + "/" + da + "/" + yr;
+}
+
 function dbToOrder(row) {
+  let buildSpecs = [];
+  try { const p = JSON.parse(row.build_specs || "[]"); buildSpecs = Array.isArray(p) ? p : []; } catch { buildSpecs = []; }
   return {
-    id: Number(row.id),
+    id: uniqueId(),
     orderNumber: row.order_number || "",
-    productId: Number(row.product_id),
-    productName: row.product_name || "",
-    materialId: row.material_id ? Number(row.material_id) : null,
-    materialName: row.material_name || "",
+    orderDate: excelSerialToDateStr(row.order_date),
+    shipDate: excelSerialToDateStr(row.ship_date),
     qty: row.qty || "1",
-    jobBuildNumber: row.job_build_number || "",
-    stainType: row.stain_type || "",
+    productName: row.product || "",
+    stainType: row.stain_color || "",
+    cover: row.cover || "",
+    plaque: row.plaque || "",
     customizations: row.customizations || "",
+    po: row.po || "",
+    retailer: row.retailer || "",
+    shipTo: row.ship_to || "",
+    productId: null,
+    materialId: null,
+    materialName: "",
+    jobBuildNumber: "",
     status: row.status || "New",
-    stage: row.stage || "New Order"
+    stage: getLocalOrderMeta(row.order_number)?.stage || row.stage || "New Order",
+    buildSpecs
   };
 }
 
@@ -235,13 +307,13 @@ async function replaceTable(table, rows) {
 
 async function loadFromSupabase() {
   setSyncStatus("Loading...");
-  const [productRows, materialRows] = await Promise.all([
-    supabaseRequest("products", { params: "?select=*&order=id.asc" }),
-    supabaseRequest("materials", { params: "?select=*&order=id.asc" })
+  const [productRows, materialRows, orderRows, jobRows, jobBuildRows] = await Promise.all([
+    supabaseRequest("products", { params: "?select=*&order=id.asc" }).catch(() => []),
+    supabaseRequest("materials", { params: "?select=*&order=id.asc" }).catch(() => []),
+    supabaseRequest("orders", { params: "?select=*&order=order_number.asc" }).catch(() => []),
+    supabaseRequest("jobs", { params: "?select=*&order=id.asc" }).catch(() => []),
+    supabaseRequest("job_builds", { params: "?select=*&order=id.asc" }).catch(() => [])
   ]);
-  const orderRows = await supabaseRequest("orders", { params: "?select=*&order=id.asc" }).catch(() => []);
-  const jobRows = await supabaseRequest("jobs", { params: "?select=*&order=id.asc" }).catch(() => []);
-  const jobBuildRows = await supabaseRequest("job_builds", { params: "?select=*&order=id.asc" }).catch(() => []);
 
   products = productRows.map(dbToProduct);
   materials = materialRows.map(dbToMaterial);
@@ -249,7 +321,16 @@ async function loadFromSupabase() {
   jobs = jobRows.map(dbToJob).filter((job) => !job.orderId && products.some((product) => product.id === job.productId));
   jobBuilds = jobBuildRows.map(dbToJobBuild);
 
-  if (!products.length) products = [{ id: uniqueId(), name: "", qtyMade: "", selectedMaterials: [] }];
+  orders.forEach(order => {
+    if (!order.buildSpecs || order.buildSpecs.length === 0) {
+      const match = products.find(p => p.name && order.productName.toLowerCase().includes(p.name.toLowerCase()));
+      if (match && Array.isArray(match.buildSpecs)) {
+        order.buildSpecs = match.buildSpecs.map(t => ({ ...t, done: false }));
+      }
+    }
+  });
+
+  if (!products.length) products = [{ id: uniqueId(), name: "", qtyMade: "", selectedMaterials: [], buildSpecs: [] }];
   if (!materials.length) materials = [{ id: uniqueId(), woodName: "", thickness: "", type: "", qty: "", lowStockThreshold: "" }];
 
   renderAll();
@@ -285,9 +366,10 @@ async function saveToSupabase() {
 }
 
 async function upsertRow(table, row) {
+  const conflict = table === "orders" ? "order_number" : "id";
   await supabaseRequest(table, {
     method: "POST",
-    params: "?on_conflict=id",
+    params: "?on_conflict=" + conflict,
     body: row,
     prefer: "resolution=merge-duplicates,return=minimal"
   });
@@ -325,20 +407,14 @@ function scheduleAutoSave(key, saveFn) {
 }
 
 function visibleMaterials() {
-  const query = el("#global-search").value.trim().toLowerCase();
-  if (!query) return materials;
-  return materials.filter((material) => `${material.woodName} ${material.thickness} ${material.type} ${material.qty} ${material.lowStockThreshold}`.toLowerCase().includes(query));
+  return materials;
 }
 
 function getWorkItems(stage) {
-  const query = el("#global-search").value.trim().toLowerCase();
   const items = [];
 
   orders.forEach(order => {
     if (order.stage !== stage) return;
-    const product = products.find(p => p.id === order.productId);
-    const searchable = `${order.productName} ${order.materialName || ""}`.toLowerCase();
-    if (!searchable.includes(query)) return;
     items.push({
       type: "order",
       id: order.id,
@@ -360,8 +436,6 @@ function getWorkItems(stage) {
       })
       .filter(n => n)
       .join(", ") || "No materials listed";
-    const searchable = `${product?.name || ""} ${materialNames}`.toLowerCase();
-    if (!searchable.includes(query)) return;
     items.push({
       type: "job",
       id: job.id,
@@ -384,8 +458,6 @@ function getWorkItems(stage) {
       const product = products.find(p => p.id === order.productId);
       product?.selectedMaterials?.forEach(sm => materialIds.add(sm.materialId));
     });
-    const searchable = `${build.buildNumber} ${materialIds.size} materials`.toLowerCase();
-    if (!searchable.includes(query)) return;
     items.push({
       type: "build",
       id: build.id,
@@ -398,22 +470,6 @@ function getWorkItems(stage) {
 
   return items;
 }
-
-function renderStats() {
-  const productCount = products.filter(p => p.name.trim()).length;
-  const materialCount = materials.filter(m => m.woodName.trim()).length;
-  const readyItems = getWorkItems("Ready To Ship");
-  const totalItems = jobStages.reduce((sum, s) => sum + getWorkItems(s).length, 0);
-  el("#stats-bar").innerHTML = `
-    <div class="stat-item"><span class="stat-number">${productCount}</span><span class="stat-label">Products</span></div>
-    <div class="stat-item"><span class="stat-number">${materialCount}</span><span class="stat-label">Materials</span></div>
-    <div class="stat-item"><span class="stat-number">${totalItems}</span><span class="stat-label">Jobs</span></div>
-    <div class="stat-item"><span class="stat-number">${orders.length}</span><span class="stat-label">Orders</span></div>
-    <div class="stat-item"><span class="stat-number">${readyItems.length}</span><span class="stat-label">Ready</span></div>
-  `;
-}
-
-function renderMetrics() {}
 
 function renderOrderFlow() {
   el("#order-flow").innerHTML = jobStages.map((stage) => {
@@ -471,11 +527,26 @@ function renderProducts() {
           </div>
         ` : `<p class="empty-state">Click to add materials</p>`}
       </div>
-      <details class="product-specs-details" style="margin-top:8px;">
-        <summary style="cursor:pointer;font-size:13px;color:var(--text-muted);">Build Specs</summary>
-        <textarea data-product-field="buildSpecs" class="product-specs-input" placeholder="Panel size for gluing up panels, edge profile, joinery details..." style="width:100%;min-height:60px;margin-top:4px;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:13px;">${escapeHtml(product.buildSpecs)}</textarea>
-      </details>
-      <div class="product-materials-editor" style="display: none;" data-product-editor="${product.id}">
+      <div class="stage-tasks" data-product-id="${product.id}" style="margin-top:8px;">
+        ${(() => { const specs = Array.isArray(product.buildSpecs) ? product.buildSpecs : []; return jobStages.map(stage => {
+          const tasks = specs.filter(t => t && t.stage === stage);
+          const done = tasks.length > 0 && tasks.every(t => t.done);
+          return tasks.length ? `<div class="stage-group">
+            <div class="stage-head ${done ? 'stage-done' : ''}">${stage} (${tasks.filter(t => t.done).length}/${tasks.length})</div>
+            ${tasks.map((t, i) => `<div class="task-item">
+              <span>${escapeHtml(t.task)}</span>
+            </div>`).join("")}
+          </div>` : '';
+        }).join(""); })()}
+        <div class="add-task-row">
+          <input type="text" class="add-task-input" placeholder="Add task..." data-add-task="${product.id}">
+          <select class="add-task-stage" data-add-stage="${product.id}">
+            ${jobStages.map(s => `<option value="${s}">${s}</option>`).join("")}
+          </select>
+          <button class="text-button" data-add-task-btn="${product.id}" type="button">Add</button>
+        </div>
+      </div>
+      <div class="product-materials-editor" style="display: ${openEditorIds.has(product.id) ? 'block' : 'none'};" data-product-editor="${product.id}">
         <h4>Select Materials</h4>
         <div class="materials-checklist">
           ${materials.filter(m => m.woodName.trim()).map((material) => {
@@ -529,10 +600,24 @@ function renderTasks() {
         <h3>${stage}<span>${stageItems.length}</span></h3>
         ${stageItems.map((item) => {
           const stageIndex = jobStages.indexOf(item.stage);
+          const order = item.type === "order" ? orders.find(o => o.id === item.id) : null;
+          const product = products.find(p => p.id === item.productId);
+          const specs = item.type === "order" && order
+            ? (order.buildSpecs || [])
+            : (product && Array.isArray(product.buildSpecs) ? product.buildSpecs : []);
+          const stageTasks = specs.filter(t => t && t.task);
           return `
             <article class="task-card">
               <button class="task-title-button" ${item.type === "order" ? `data-order-summary="${item.id}"` : `data-task-summary="${item.productId}"`} type="button">${item.orderNumber ? escapeHtml(item.orderNumber) + " " : ""}${escapeHtml(item.productName)}</button>
               <div class="product-meta">${escapeHtml(item.materialNames)}</div>
+              ${stageTasks.length ? `<div class="task-list">${item.type === "order"
+                ? stageTasks.map((t, i) =>
+                    `<label class="task-item" style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;cursor:pointer;">
+                      <input type="checkbox" data-wb-task-check="${item.id}" data-wb-task-idx="${i}" ${t.done ? 'checked' : ''}>
+                      <span class="${t.done ? 'task-done' : ''}">${escapeHtml(t.task)}</span>
+                    </label>`).join("")
+                : stageTasks.map(t => `<span class="${t.done ? 'task-done' : ''}" style="display:block;font-size:12px;">${escapeHtml(t.task)}</span>`).join("")
+              }</div>` : ""}
               <div class="detail-strip">
                 <span class="detail-chip">${escapeHtml(stage)}</span>
               </div>
@@ -556,14 +641,20 @@ function renderOrders() {
 
   el("#orders-table").innerHTML = sorted.map((order) => `
     <tr>
-      <td><strong>${escapeHtml(order.orderNumber || "-")}</strong></td>
-      <td>${escapeHtml(order.productName)}</td>
-      <td>${escapeHtml(order.qty || "1")}</td>
-      <td>${escapeHtml(order.stainType || "-")}</td>
-      <td class="order-customizations-cell">${escapeHtml(order.customizations || "-")}</td>
-      <td><button class="delete-order-btn" data-delete-order="${order.id}" type="button" title="Delete order">&times;</button></td>
+      <td class="col-orderNo"><strong>${escapeHtml(order.orderNumber || "-")}</strong></td>
+      <td class="col-product">${escapeHtml(order.productName)}</td>
+      <td class="col-qty">${escapeHtml(order.qty || "1")}</td>
+      <td class="col-stain">${escapeHtml(order.stainType || "-")}</td>
+      <td class="col-orderDate">${escapeHtml(order.orderDate || "-")}</td>
+      <td class="col-shipDate">${escapeHtml(order.shipDate || "-")}</td>
+      <td class="col-cover">${escapeHtml(order.cover || "-")}</td>
+      <td class="col-plaque">${escapeHtml(order.plaque || "-")}</td>
+      <td class="col-po">${escapeHtml(order.po || "-")}</td>
+      <td class="col-retailer">${escapeHtml(order.retailer || "-")}</td>
+      <td class="col-shipTo">${escapeHtml(order.shipTo || "-")}</td>
+      <td class="col-customizations">${escapeHtml(order.customizations || "-")}</td>
     </tr>
-  `).join("") || '<tr><td colspan="6" class="empty-table">No orders yet.</td></tr>';
+  `).join("") || '<tr><td colspan="12" class="empty-table">No orders yet.</td></tr>';
 
   el("#order-count").textContent = `${orders.length} order${orders.length !== 1 ? "s" : ""}`;
 }
@@ -630,10 +721,7 @@ function renderJobBuilds() {
   }).join("") || "<p>No job builds yet.</p>";
 }
 
-
-
 function renderAll() {
-  renderStats();
   renderOrderFlow();
   renderAlerts();
   const readyCount = getWorkItems("Ready To Ship").length;
@@ -667,22 +755,13 @@ function showProductDetailPanel(productId) {
   }).join("");
   el("#detail-materials-chips").innerHTML = materialChips || "<p class=\"empty-state\">No materials selected</p>";
 
-  el("#detail-specs").textContent = product.buildSpecs || "No specs set";
+  el("#detail-specs").innerHTML = Array.isArray(product.buildSpecs) && product.buildSpecs.length
+    ? product.buildSpecs.map(t => `<span style="display:block;font-size:12px;${t.done ? 'text-decoration:line-through;color:var(--muted)' : ''}">${escapeHtml(t.task)} <span style="color:var(--text-muted);font-size:11px">(${t.stage})</span></span>`).join("")
+    : "No specs set";
 
-  const relatedOrders = orders.filter(o => o.productId === productId);
-  el("#detail-orders-list").innerHTML = relatedOrders.length > 0 ? relatedOrders.map(order => `
-    <div class="order-detail-item">
-      <div class="order-detail-header">
-        <strong>${escapeHtml(order.orderNumber || "Unnamed Order")}</strong>
-        <span class="status-pill status-quote">${escapeHtml(order.status)}</span>
-      </div>
-      <div class="order-detail-info">
-        <p><strong>Qty:</strong> ${escapeHtml(order.qty || "1")}</p>
-        <p><strong>Stain:</strong> ${escapeHtml(order.stainType || "-")}</p>
-        <p><strong>Customizations:</strong> ${escapeHtml(order.customizations || "-")}</p>
-      </div>
-    </div>
-  `).join("") : "<p class=\"empty-state\">No orders for this product</p>";
+  el("#detail-orders-section").style.display = "";
+  el("#detail-notes-section").style.display = "none";
+  el("#detail-orders-list").innerHTML = "";
 
   el("#product-detail-panel").classList.add("open");
   el("#side-panel-backdrop").classList.add("open");
@@ -699,21 +778,18 @@ function showOrderDetailPanel(orderId) {
     <span class="chip">${escapeHtml(order.stainType || "No stain")}</span>
     <span class="chip">${escapeHtml(order.stage)}</span>
   `;
-  el("#detail-specs").textContent = order.customizations || "No customizations";
-  el("#detail-orders-list").innerHTML = `
-    <div class="order-detail-item">
-      <div class="order-detail-header">
-        <strong>Order ${escapeHtml(order.orderNumber || "—")}</strong>
-        <span class="status-pill status-quote">${escapeHtml(order.status)}</span>
-      </div>
-      <div class="order-detail-info">
-        <p><strong>Product:</strong> ${escapeHtml(order.productName)}</p>
-        <p><strong>Qty:</strong> ${escapeHtml(order.qty || "1")}</p>
-        <p><strong>Stain:</strong> ${escapeHtml(order.stainType || "-")}</p>
-        <p><strong>Stage:</strong> ${escapeHtml(order.stage)}</p>
-      </div>
-    </div>
-  `;
+  el("#detail-specs").innerHTML = Array.isArray(order.buildSpecs) && order.buildSpecs.length
+    ? order.buildSpecs.map((t, i) =>
+        `<label class="task-item" style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;cursor:pointer;">
+          <input type="checkbox" data-order-task-check="${order.id}" data-order-task-idx="${i}" ${t.done ? 'checked' : ''}>
+          <span class="${t.done ? 'task-done' : ''}">${escapeHtml(t.task)}</span>
+          <span style="color:var(--text-muted);font-size:11px">(${t.stage})</span>
+        </label>`).join("")
+    : (order.customizations || "No specs set");
+
+  el("#detail-orders-section").style.display = "none";
+  el("#detail-notes-section").style.display = "";
+  el("#detail-order-notes").value = getLocalOrderMeta(order.orderNumber)?.notes || "";
 
   el("#product-detail-panel").classList.add("open");
   el("#side-panel-backdrop").classList.add("open");
@@ -727,6 +803,8 @@ function showJobBuildDetailPanel(buildId) {
   el("#detail-product-name").textContent = `Job Build ${build.buildNumber}`;
   el("#detail-name").textContent = `Job Build ${build.buildNumber}`;
   el("#detail-qty").textContent = build.productCount || "0";
+  el("#detail-orders-section").style.display = "";
+  el("#detail-notes-section").style.display = "none";
   el("#detail-materials-chips").innerHTML = `<span class="chip">${buildOrders.length} orders</span><span class="chip">${escapeHtml(build.stage || "New Task")}</span>`;
   el("#detail-orders-list").innerHTML = buildOrders.length > 0 ? buildOrders.map((order) => `
     <div class="order-detail-item" data-build-order="${order.id}" style="cursor:pointer;">
@@ -838,6 +916,7 @@ document.addEventListener("click", (event) => {
       const nextIndex = jobStages.indexOf(order.stage) + direction;
       if (jobStages[nextIndex]) {
         order.stage = jobStages[nextIndex];
+        setLocalOrderMeta(order.orderNumber, { stage: order.stage });
         renderAll();
         scheduleAutoSave(`order:${order.id}`, () => upsertRow("orders", orderToDb(order)));
       }
@@ -850,7 +929,7 @@ document.addEventListener("click", (event) => {
         const targetStage = jobStages[nextIndex];
         build.stage = targetStage;
         const buildOrders = getOrdersForBuild(build.buildNumber);
-        buildOrders.forEach(order => { order.stage = targetStage; });
+        buildOrders.forEach(order => { order.stage = targetStage; setLocalOrderMeta(order.orderNumber, { stage: order.stage }); });
         renderAll();
         scheduleAutoSave(`build:${build.id}`, async () => {
           await upsertRow("job_builds", jobBuildToDb(build));
@@ -872,7 +951,6 @@ document.addEventListener("click", (event) => {
   }
 });
 
-el("#global-search").addEventListener("input", renderAll);
 
 el("#create-build-btn").addEventListener("click", () => {
   switchView("jobbuilds");
@@ -930,7 +1008,7 @@ el("#toggle-order-form-btn").addEventListener("click", () => {
 setSyncStatus(isConnected() ? "Connected" : "Not connected");
 
 el("#add-product-row-btn").addEventListener("click", () => {
-  const product = { id: uniqueId(), name: "", qtyMade: "", selectedMaterials: [] };
+  const product = { id: uniqueId(), name: "", qtyMade: "", selectedMaterials: [], buildSpecs: [] };
   products.push(product);
   renderAll();
 });
@@ -973,7 +1051,7 @@ el("#product-list-container").addEventListener("input", (event) => {
     renderOrderFlow();
     renderTasks();
     scheduleAutoSave(`product:${product.id}`, async () => {
-      const hasContent = product.name || product.qtyMade || (product.selectedMaterials && product.selectedMaterials.length > 0);
+      const hasContent = product.name || product.qtyMade || (product.selectedMaterials && product.selectedMaterials.length > 0) || (product.buildSpecs && product.buildSpecs.length > 0);
       if (hasContent) {
         await upsertRow("products", productToDb(product));
         const job = jobs.find((item) => item.productId === product.id);
@@ -1033,10 +1111,9 @@ el("#product-list-container").addEventListener("click", (event) => {
     const editor = card.querySelector(`[data-product-editor="${productId}"]`);
     const cellDisplay = card.querySelector(`[data-product-materials="${productId}"]`);
     
-    if (editor.style.display === "none") {
-      editor.style.display = "block";
-      cellDisplay.style.display = "none";
-    }
+    openEditorIds.add(productId);
+    editor.style.display = "block";
+    cellDisplay.style.display = "none";
     return;
   }
 
@@ -1047,12 +1124,48 @@ el("#product-list-container").addEventListener("click", (event) => {
     const editor = card.querySelector(`[data-product-editor="${productId}"]`);
     const cellDisplay = card.querySelector(`[data-product-materials="${productId}"]`);
     
+    openEditorIds.delete(productId);
     editor.style.display = "none";
     cellDisplay.style.display = "block";
     renderProducts();
     return;
   }
 
+  const addBtn = event.target.closest("[data-add-task-btn]");
+  if (addBtn) {
+    const productId = Number(addBtn.dataset.addTaskBtn);
+    const card = addBtn.closest("[data-product-row]");
+    const product = products.find(p => p.id === productId);
+    const input = card.querySelector(`[data-add-task="${productId}"]`);
+    const stage = card.querySelector(`[data-add-stage="${productId}"]`).value;
+    const task = input.value.trim();
+    if (task && product) {
+      if (!Array.isArray(product.buildSpecs)) product.buildSpecs = [];
+      product.buildSpecs.push({ task, stage, done: false });
+      input.value = "";
+      renderProducts();
+      scheduleAutoSave(`product:${product.id}`, () => upsertRow("products", productToDb(product)));
+    }
+    return;
+  }
+});
+
+el("#product-list-container").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  const input = event.target.closest("[data-add-task]");
+  if (!input) return;
+  const productId = Number(input.dataset.addTask);
+  const card = input.closest("[data-product-row]");
+  const product = products.find(p => p.id === productId);
+  const stage = card.querySelector(`[data-add-stage="${productId}"]`).value;
+  const task = input.value.trim();
+  if (task && product) {
+    if (!Array.isArray(product.buildSpecs)) product.buildSpecs = [];
+    product.buildSpecs.push({ task, stage, done: false });
+    input.value = "";
+    renderProducts();
+    scheduleAutoSave(`product:${product.id}`, () => upsertRow("products", productToDb(product)));
+  }
 });
 
 el("#create-order-btn").addEventListener("click", () => {
@@ -1060,6 +1173,13 @@ el("#create-order-btn").addEventListener("click", () => {
   const productId = Number(el("#order-product-select").value);
   const qty = el("#order-qty").value.trim();
   const stainType = el("#order-stain-type").value.trim();
+  const orderDate = el("#order-date").value;
+  const shipDate = el("#order-ship-date").value;
+  const cover = el("#order-cover").value.trim();
+  const plaque = el("#order-plaque").value.trim();
+  const po = el("#order-po").value.trim();
+  const retailer = el("#order-retailer").value.trim();
+  const shipTo = el("#order-ship-to").value.trim();
   const customizations = el("#order-customizations").value.trim();
 
   const product = products.find((item) => item.id === productId);
@@ -1068,13 +1188,20 @@ el("#create-order-btn").addEventListener("click", () => {
   const order = {
     id: uniqueId(),
     orderNumber,
-    productId: product.id,
-    productName: product.name,
+    orderDate,
+    shipDate,
     qty: qty || "1",
+    productName: product.name,
     stainType,
+    cover,
+    plaque,
+    po,
+    retailer,
+    shipTo,
     customizations,
     status: "New",
-    stage: "New Order"
+    stage: "New Order",
+    buildSpecs: (product.buildSpecs || []).map(t => ({ ...t, done: false }))
   };
 
   orders.unshift(order);
@@ -1083,6 +1210,13 @@ el("#create-order-btn").addEventListener("click", () => {
   el("#order-product-select").value = "";
   el("#order-qty").value = "1";
   el("#order-stain-type").value = "";
+  el("#order-date").value = "";
+  el("#order-ship-date").value = "";
+  el("#order-cover").value = "";
+  el("#order-plaque").value = "";
+  el("#order-po").value = "";
+  el("#order-retailer").value = "";
+  el("#order-ship-to").value = "";
   el("#order-customizations").value = "";
   renderAll();
   scheduleAutoSave(`order:${order.id}`, async () => {
@@ -1090,6 +1224,8 @@ el("#create-order-btn").addEventListener("click", () => {
   });
   showToast("Order created.");
 });
+
+
 
 el("#orders-table").addEventListener("click", (event) => {
   const deleteBtn = event.target.closest("[data-delete-order]");
@@ -1100,18 +1236,74 @@ el("#orders-table").addEventListener("click", (event) => {
   orders = orders.filter((o) => o.id !== orderId);
   renderAll();
   scheduleAutoSave(`delete:order:${orderId}`, async () => {
-    await deleteRow("orders", orderId);
+    await supabaseRequest("orders", {
+      method: "DELETE",
+      params: `?order_number=eq.${encodeURIComponent(order.orderNumber)}`,
+      prefer: "return=minimal"
+    });
   });
   showToast("Order deleted.");
 });
 
+function onOrderTaskToggle(orderId, idx, done) {
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
+  if (order.buildSpecs && order.buildSpecs[idx]) {
+    order.buildSpecs[idx].done = done;
+  }
+
+  const currentTasks = (order.buildSpecs || []).filter(t => t && t.stage && t.stage.toLowerCase() === (order.stage || "").toLowerCase());
+  if (currentTasks.length > 0 && currentTasks.every(t => t.done)) {
+    const nextIdx = jobStages.findIndex(s => s.toLowerCase() === (order.stage || "").toLowerCase()) + 1;
+    if (jobStages[nextIdx]) {
+      order.stage = jobStages[nextIdx];
+      setLocalOrderMeta(order.orderNumber, { stage: order.stage });
+    }
+  }
+
+  renderAll();
+  scheduleAutoSave(`order:${order.id}`, () => upsertRow("orders", orderToDb(order)));
+}
+
+el("#product-detail-panel").addEventListener("change", (event) => {
+  const cb = event.target.closest("[data-order-task-check]");
+  if (!cb) return;
+  onOrderTaskToggle(Number(cb.dataset.orderTaskCheck), Number(cb.dataset.orderTaskIdx), cb.checked);
+});
+
+el("#task-board").addEventListener("change", (event) => {
+  const cb = event.target.closest("[data-wb-task-check]");
+  if (!cb) return;
+  onOrderTaskToggle(Number(cb.dataset.wbTaskCheck), Number(cb.dataset.wbTaskIdx), cb.checked);
+});
+
 // Settings panel
+el("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = el("#login-btn");
+  btn.disabled = true;
+  btn.textContent = "Signing in...";
+  el("#login-error").textContent = "";
+  try {
+    await login(el("#login-username").value, el("#login-password").value);
+  } catch (err) {
+    el("#login-error").textContent = err.message;
+  }
+  btn.disabled = false;
+  btn.textContent = "Sign In";
+});
+
+el("#logout-btn").addEventListener("click", logout);
+
 el("#settings-btn").addEventListener("click", () => {
-  el("#supabase-url").value = supabaseConfig.url;
-  el("#supabase-key").value = supabaseConfig.key;
   el("#settings-panel").classList.add("open");
   el("#settings-backdrop").classList.add("open");
-  el("#settings-hint").textContent = supabaseConfig.url ? "Credentials loaded. Click Save to reconnect." : "Enter your Supabase project URL and anon key, then click Save.";
+  el("#settings-user-name").textContent = currentUser ? currentUser.username : "";
+});
+
+el("#settings-signout-btn").addEventListener("click", () => {
+  closeSettings();
+  logout();
 });
 
 function closeSettings() {
@@ -1122,34 +1314,163 @@ function closeSettings() {
 el("#close-settings").addEventListener("click", closeSettings);
 el("#settings-backdrop").addEventListener("click", closeSettings);
 
-el("#save-supabase-btn").addEventListener("click", () => {
-  const url = el("#supabase-url").value.trim();
-  const key = el("#supabase-key").value.trim();
-  if (!url || !key) return showToast("Enter both URL and anon key.");
-  supabaseConfig.url = url.replace(/\/$/, "");
-  supabaseConfig.key = key;
-  localStorage.setItem("stockroom_supabase_url", supabaseConfig.url);
-  localStorage.setItem("stockroom_supabase_key", supabaseConfig.key);
-  closeSettings();
-  showToast("Credentials saved. Reloading data...");
-  syncReady = false;
-  loadFromSupabase().catch((error) => {
-    syncReady = false;
-    setSyncStatus("Connection failed");
-    showToast(error.message);
-  });
+el("#save-order-notes").addEventListener("click", () => {
+  const panel = el("#product-detail-panel");
+  const orderNumber = panel.querySelector("#detail-product-name")?.textContent?.replace("Order #", "");
+  if (!orderNumber) return;
+  const order = orders.find(o => o.orderNumber === orderNumber);
+  if (!order) return;
+  const notes = el("#detail-order-notes").value.trim();
+  order.notes = notes;
+  setLocalOrderMeta(order.orderNumber, { notes });
+  showToast("Notes saved");
 });
 
-el("#clear-supabase-btn").addEventListener("click", () => {
-  localStorage.removeItem("stockroom_supabase_url");
-  localStorage.removeItem("stockroom_supabase_key");
-  supabaseConfig.url = "";
-  supabaseConfig.key = "";
-  closeSettings();
-  showToast("Disconnected from Supabase.");
-  syncReady = false;
-  setSyncStatus("Offline");
+async function getAllUsers() {
+  const rows = await supabaseRequest("users", { params: "?select=username,tabs&order=username.asc" });
+  return rows || [];
+}
+
+async function upsertUser(username, password, tabs) {
+  const existing = await supabaseRequest("users", { params: `?username=eq.${encodeURIComponent(username)}&select=username` });
+  if (existing && existing.length) {
+    const body = {};
+    if (password) body.password = password;
+    if (tabs) body.tabs = tabs;
+    if (Object.keys(body).length) await supabaseRequest("users", { method: "PATCH", params: `?username=eq.${encodeURIComponent(username)}`, body, prefer: "return=minimal" });
+  } else {
+    await supabaseRequest("users", { method: "POST", body: { username, password: password || "changeme", tabs: tabs || allTabs }, prefer: "return=minimal" });
+  }
+}
+
+async function removeUser(username) {
+  await supabaseRequest("users", { method: "DELETE", params: `?username=eq.${encodeURIComponent(username)}`, prefer: "return=minimal" });
+}
+
+async function renderPermissions() {
+  const users = await getAllUsers();
+  const tbody = el("#permissions-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = users.map(u => {
+    const passwordPlaceholder = u.username === currentUser?.username ? "" : "";
+    return `<tr>
+      <td><strong>${escapeHtml(u.username)}</strong></td>
+      <td><input type="text" class="user-pw-input" data-username="${escapeHtml(u.username)}" placeholder="${passwordPlaceholder}" value=""></td>
+      ${allTabs.map(tab => `<td><input type="checkbox" class="user-tab-cb" data-username="${escapeHtml(u.username)}" data-tab="${tab}" ${(u.tabs || []).includes(tab) ? "checked" : ""}></td>`).join("")}
+      <td>${u.username === "admin" || u.username === "user" ? "" : `<button class="text-button" data-delete-user="${escapeHtml(u.username)}" type="button" style="color:var(--coral);">Delete</button>`}</td>
+    </tr>`;
+  }).join("");
+}
+
+el("#permissions-table-body")?.addEventListener("change", async (e) => {
+  const cb = e.target.closest(".user-tab-cb");
+  if (!cb) return;
+  const username = cb.dataset.username;
+  const checkboxes = document.querySelectorAll(`.user-tab-cb[data-username="${username}"]`);
+  const tabs = [...checkboxes].filter(c => c.checked).map(c => c.dataset.tab);
+  try {
+    await upsertUser(username, "", tabs);
+    if (username === currentUser?.username) {
+      currentUser.tabs = tabs;
+      saveSession(currentUser);
+      applyPermissions();
+    }
+  } catch { showToast("Failed to update permissions"); }
 });
+
+el("#permissions-table-body")?.addEventListener("change", async (e) => {
+  const pw = e.target.closest(".user-pw-input");
+  if (!pw || !pw.value.trim()) return;
+  try {
+    await upsertUser(pw.dataset.username, pw.value.trim());
+    pw.value = "";
+    showToast("Password updated");
+  } catch { showToast("Failed to update password"); }
+});
+
+el("#permissions-table-body")?.addEventListener("click", async (e) => {
+  const delBtn = e.target.closest("[data-delete-user]");
+  if (!delBtn) return;
+  const username = delBtn.dataset.deleteUser;
+  if (!confirm(`Delete user "${username}"?`)) return;
+  try {
+    await removeUser(username);
+    await renderPermissions();
+    showToast("User deleted");
+  } catch { showToast("Failed to delete user"); }
+});
+
+el("#add-user-btn")?.addEventListener("click", () => {
+  el("#add-user-form").style.display = el("#add-user-form").style.display === "none" ? "" : "none";
+});
+
+el("#cancel-new-user-btn")?.addEventListener("click", () => {
+  el("#add-user-form").style.display = "none";
+  el("#new-user-username").value = "";
+  el("#new-user-password").value = "";
+});
+
+el("#save-new-user-btn")?.addEventListener("click", async () => {
+  const username = el("#new-user-username").value.trim();
+  const password = el("#new-user-password").value.trim();
+  if (!username) { showToast("Username required"); return; }
+  const tabCbs = el("#new-user-tabs").querySelectorAll("input[type=checkbox]:checked");
+  const tabs = [...tabCbs].map(c => c.value);
+  try {
+    await upsertUser(username, password || "changeme", tabs);
+    el("#add-user-form").style.display = "none";
+    el("#new-user-username").value = "";
+    el("#new-user-password").value = "";
+    await renderPermissions();
+    showToast("User created");
+  } catch { showToast("Failed to create user"); }
+});
+
+// Trigger permissions render when switching to permissions view
+const origSwitchView = switchView;
+switchView = function(view) {
+  origSwitchView(view);
+  if (view === "permissions") renderPermissions();
+};
+
+function initColumnResize() {
+  const table = document.getElementById("orders-data-table");
+  if (!table) return;
+  const handles = table.querySelectorAll(".resize-handle");
+  let startX, startWidth, th;
+
+  handles.forEach(handle => {
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      th = handle.parentElement;
+      startX = e.clientX;
+      startWidth = th.offsetWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    });
+  });
+
+  function onMouseMove(e) {
+    if (!th) return;
+    const diff = e.clientX - startX;
+    const newWidth = Math.max(40, startWidth + diff);
+    th.style.width = newWidth + "px";
+    const colClass = th.className.split(" ").find(c => c.startsWith("col-"));
+    if (colClass) {
+      table.querySelectorAll("td." + colClass).forEach(td => td.style.width = newWidth + "px");
+    }
+  }
+
+  function onMouseUp() {
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    th = null;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  }
+}
 
 // Escape key closes panels
 document.addEventListener("keydown", (event) => {
@@ -1159,131 +1480,39 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-function excelDateStr(serial) {
-  if (!serial || typeof serial !== "number") return "";
-  const d = new Date(Math.floor(serial - 25569) * 86400000);
-  return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
-}
-
-function processExcelRows(rows, extraExisting) {
-  const existingOrderNumbers = new Set(orders.map(o => String(o.orderNumber).trim()).filter(Boolean));
-  if (extraExisting) extraExisting.forEach(n => existingOrderNumbers.add(n));
-  let count = 0;
-
-  rows.forEach(row => {
-    const name = String(row["Product"] || "").trim();
-    if (!name) return;
-
-    const orderNum = String(row["Order Number"] || "").trim();
-
-    let product = products.find(p => p.name === name);
-    if (!product) {
-      product = { id: uniqueId(), name, qtyMade: "", selectedMaterials: [], buildSpecs: "" };
-      products.push(product);
-      jobs.unshift({ id: uniqueId(), productId: product.id, stage: "New Order" });
-    }
-
-    const extras = [];
-    if (row["Cover"]) extras.push("Cover: " + row["Cover"]);
-    if (row["Plaque"]) extras.push("Plaque: " + row["Plaque"]);
-    if (row["P.O"]) extras.push("P.O: " + row["P.O"]);
-    if (row["Retailer"]) extras.push("Retailer: " + row["Retailer"]);
-    if (row["Ship To"]) extras.push("Ship To: " + row["Ship To"]);
-    if (row["Order Date"]) { const d = excelDateStr(row["Order Date"]); if (d) extras.push("Order Date: " + d); }
-    if (row["Ship Date"]) { const d = excelDateStr(row["Ship Date"]); if (d) extras.push("Ship Date: " + d); }
-
-    const existingCustom = String(row["Customizations"] || "").trim();
-    let customizations = extras.join("\n");
-    if (existingCustom) customizations = customizations ? customizations + "\n" + existingCustom : existingCustom;
-
-    if (orderNum && existingOrderNumbers.has(orderNum)) {
-      const order = orders.find(o => String(o.orderNumber).trim() === orderNum);
-      if (order) {
-        order.qty = String(row["QTY"] || "1");
-        order.stainType = String(row["Stain color"] || "");
-        order.customizations = customizations;
-      }
-      count++;
-      return;
-    }
-
-    if (orderNum) existingOrderNumbers.add(orderNum);
-
-    orders.unshift({
-      id: uniqueId(),
-      orderNumber: orderNum,
-      productId: product.id,
-      productName: product.name,
-      qty: String(row["QTY"] || "1"),
-      stainType: String(row["Stain color"] || ""),
-      customizations,
-      status: "New",
-      stage: "New Order"
-    });
-
-    count++;
-  });
-
-  return count;
-}
-
-function finishImport(count, from) {
-  if (count > 0) {
-    renderAll();
-    if (isConnected()) saveToSupabase().catch(() => {});
-  }
-  console.log("Excel import (" + from + "): " + count + " new orders");
-}
-
-async function importFromExcel() {
+async function loadSupabaseConfig() {
   try {
-    const res = await fetch("Stockroom.xlsx");
-    if (!res.ok) return;
-    const buf = await res.arrayBuffer();
-    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-
-    let remoteNumbers;
-    if (isConnected()) {
-      try {
-        const existing = await supabaseRequest("orders", { params: "?select=order_number" });
-        remoteNumbers = new Set(existing.map(r => String(r.order_number).trim()).filter(Boolean));
-      } catch (_) {}
+    const res = await fetch("/api/supabase-config");
+    const data = await res.json();
+    if (data.url && data.key) {
+      supabaseConfig.url = data.url.replace(/\/$/, "");
+      supabaseConfig.key = data.key;
     }
+  } catch {}
+}
 
-    finishImport(processExcelRows(rows, remoteNumbers), "auto");
-  } catch (e) {
-    console.log("Excel auto-import skipped: " + e.message);
+function initApp() {
+  renderAll();
+  initColumnResize();
+
+  if (isConnected()) {
+    loadFromSupabase().catch((error) => {
+      syncReady = false;
+      setSyncStatus("Auto-load failed");
+      showToast(error.message);
+    });
   }
 }
 
-function importFromExcelFile(file) {
-  const reader = new FileReader();
-  reader.onload = function (e) {
-    try {
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-      finishImport(processExcelRows(rows), "manual");
-    } catch (err) {
-      showToast("Error importing Excel: " + err.message);
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-el("#import-excel-btn").addEventListener("click", () => importFromExcel());
-
-importFromExcel();
-setInterval(importFromExcel, 60000);
-
-renderAll();
-
-if (isConnected()) {
-  loadFromSupabase().catch((error) => {
-    syncReady = false;
-    setSyncStatus("Auto-load failed");
-    showToast(error.message);
-  });
-}
-
-
+loadSupabaseConfig().then(() => {
+  loadSession();
+  setSyncStatus(isConnected() ? "Connected" : "Not connected");
+  if (currentUser) {
+    el("#login-overlay").classList.add("hidden");
+    applyPermissions();
+    isReady = true;
+    initApp();
+  } else {
+    el("#login-overlay").classList.remove("hidden");
+  }
+});
