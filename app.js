@@ -33,19 +33,19 @@ let isReady = false;
 
 function loadSession() {
   try {
-    const raw = localStorage.getItem("stockroom_user");
+    const raw = localStorage.getItem("inventory_user");
     if (raw) currentUser = JSON.parse(raw);
   } catch { currentUser = null; }
 }
 
 function saveSession(user) {
   currentUser = user;
-  localStorage.setItem("stockroom_user", JSON.stringify(user));
+  localStorage.setItem("inventory_user", JSON.stringify(user));
 }
 
 function clearSession() {
   currentUser = null;
-  localStorage.removeItem("stockroom_user");
+  localStorage.removeItem("inventory_user");
 }
 
 function applyPermissions() {

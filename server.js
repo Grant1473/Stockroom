@@ -198,5 +198,5 @@ http.createServer((req, res) => {
     res.end(data);
   });
 }).listen(PORT, () => {
-  console.log(`Stockroom running at http://localhost:${PORT}`);
+  console.log(`Inventory running at http://localhost:${PORT}`);
 });

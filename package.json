@@ -1,7 +1,7 @@
 {
-  "name": "stockroom",
+  "name": "inventory",
   "version": "1.0.0",
-  "description": "Stockroom - Job and material management",
+  "description": "Inventory - Job and material management",
   "private": true,
   "scripts": {
     "start": "node server.js"
