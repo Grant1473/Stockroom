@@ -28,6 +28,9 @@
         </label>
         <p class="login-error" id="login-error"></p>
         <button class="primary-button" id="login-btn" type="submit" style="width:100%;">Sign In</button>
+        <div style="margin-top:12px;">
+          <button class="text-button" id="local-auth-btn" type="button" style="width:100%;background:none;border:none;color:var(--teal);cursor:pointer;font-size:13px;text-decoration:underline;">Use offline credentials</button>
+        </div>
       </form>
       <span class="sync-indicator" id="login-sync-indicator" style="justify-content:center;margin-top:12px;" title="Sync status">○ Offline</span>
       <button class="text-button logout-btn" id="logout-btn" type="button" style="display:none;">Sign Out</button>
@@ -370,18 +373,24 @@
         <h3>Related Orders</h3>
         <div id="detail-orders-list" class="orders-list"></div>
       </div>
-      <div class="detail-section" id="detail-activity-section" style="display:none;">
-        <h3>Notes &amp; Files</h3>
-        <textarea id="detail-order-notes" class="notes-textarea" placeholder="Add notes about this order..." style="width:100%;min-height:80px;resize:vertical;"></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-          <button id="save-order-notes" class="primary-button" type="button" style="white-space:nowrap;font-size:12px;padding:4px 10px;height:30px;width:auto;flex-shrink:0;">Save Text</button>
-          <div style="flex:1;"></div>
-          <label for="detail-file-input" id="upload-file-btn" class="primary-button" style="white-space:nowrap;flex-shrink:0;cursor:pointer;min-height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;">Upload</label>
-          <input id="detail-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;">
-        </div>
-        <div id="detail-files-list" class="files-list" style="margin-top:8px;"></div>
-        <div id="order-activity-log" style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px;max-height:200px;overflow-y:auto;"></div>
-      </div>
+       <div class="detail-section" id="detail-activity-section" style="display:none;">
+         <h3>Notes &amp; Files</h3>
+         <textarea id="detail-order-notes" class="notes-textarea" placeholder="Add notes about this order..." style="width:100%;min-height:80px;resize:vertical;"></textarea>
+         <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+        <button id="save-order-notes" class="primary-button" type="button" style="white-space:nowrap;font-size:12px;padding:4px 10px;height:30px;width:auto;flex-shrink:0;">Save Text</button>
+            <div style="flex:1;"></div>
+          </div>
+         <div id="order-activity-log" style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px;max-height:200px;overflow-y:auto;"></div>
+
+         <div class="detail-section" id="detail-attachments-section" style="display:none;margin-top:16px;">
+           <h3>Attachments</h3>
+           <div id="detail-attachments-list" style="margin-top:8px;"></div>
+           <div style="margin-top:12px;">
+             <input type="file" id="detail-attachment-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;">
+             <button id="attach-file-btn" class="primary-button" type="button" style="white-space:nowrap;font-size:12px;padding:4px 12px;height:30px;width:auto;flex-shrink:0;cursor:pointer;">+ Attach File</button>
+           </div>
+         </div>
+       </div>
     </div>
   </aside>
 
@@ -439,6 +448,8 @@
     </div>
   </div>
 
+  <script src="src/supabaseConnection.js"></script>
+  <script src="src/connectionBootstrap.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

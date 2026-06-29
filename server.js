@@ -38,7 +38,19 @@ function initDatabase() {
     UNIQUE(order_number, file_name)
   );
   CREATE INDEX IF NOT EXISTS idx_order_number ON file_uploads(order_number);
-  CREATE INDEX IF NOT EXISTS idx_upload_date ON file_uploads(upload_date);`;
+  CREATE INDEX IF NOT EXISTS idx_upload_date ON file_uploads(upload_date);
+  CREATE TABLE IF NOT EXISTS order_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_number TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    file_type TEXT,
+    file_size INTEGER,
+    uploaded_by TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_order_attachments_order ON order_attachments(order_number);
+  CREATE INDEX IF NOT EXISTS idx_order_attachments_date ON order_attachments(upload_date);`;
 
   db.exec(sql, (err) => {
     if (err) {
@@ -346,6 +358,66 @@ http.createServer((req, res) => {
     const publicUrl = `${cfg.supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${relPath}`;
     res.writeHead(302, { Location: publicUrl });
     res.end();
+    return;
+  }
+
+  if (pathname === "/api/attachments" && req.method === "POST") {
+    parseBody(req).then(async (body) => {
+      const cfg = readConfig();
+      const orderNumber = body.orderNumber;
+      const fileName = body.fileName;
+      const data = body.data;
+      if (!orderNumber || !fileName || !data) {
+        return sendJson(res, 400, { error: "Missing orderNumber, fileName, or data" });
+      }
+      const safe = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, "_");
+      const objectPath = `${String(orderNumber)}/${safe}`;
+      const buffer = Buffer.from(data, "base64");
+      const apiUrl = `${cfg.supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${objectPath}`;
+      const result = await supabaseFetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "apikey": cfg.supabaseKey,
+          "Authorization": "Bearer " + cfg.supabaseKey
+        },
+        body: buffer
+      });
+      if (result.status >= 400) {
+        sendJson(res, 500, { error: "Storage error: " + result.status + " " + result.body });
+      } else {
+        const fileType = fileName.split(".").pop() || "unknown";
+        const fileSize = Buffer.byteLength(buffer);
+        db.run(
+          "INSERT INTO order_attachments (order_number, file_name, storage_path, file_type, file_size) VALUES (?, ?, ?, ?, ?)",
+          [orderNumber, safe, objectPath, fileType, fileSize],
+          function(err) {
+            if (err) {
+              sendJson(res, 500, { error: "Database error: " + err.message });
+            } else {
+              sendJson(res, 200, { fileName: safe });
+            }
+          }
+        );
+      }
+    }).catch(e => sendJson(res, 400, { error: e.message }));
+    return;
+  }
+
+  if (pathname === "/api/attachments" && req.method === "GET") {
+    const orderNumber = parsed.query.orderNumber;
+    if (!orderNumber) return sendJson(res, 400, { error: "Missing orderNumber" });
+    db.all(
+      "SELECT file_name, upload_date, file_type, file_size FROM order_attachments WHERE order_number = ? ORDER BY upload_date DESC",
+      [orderNumber],
+      (err, rows) => {
+        if (err) {
+          sendJson(res, 500, { error: "Database error: " + err.message });
+        } else {
+          sendJson(res, 200, rows || []);
+        }
+      }
+    );
     return;
   }
 
