@@ -4,8 +4,50 @@ const fs = require("fs");
 const path = require("path");
 const url = require("url");
 const XLSX = require("xlsx");
+const sqlite3 = require("sqlite3").verbose();
 
+const STORAGE_BUCKET = "order-files";
 const PORT = 5500;
+
+// Initialize SQLite database for file uploads tracking
+let db;
+try {
+  db = new sqlite3.Database(path.join(__dirname, "file_uploads.db"), (err) => {
+    if (err) {
+      console.error("Error initializing database:", err.message);
+    } else {
+      console.log("Connected to SQLite database for file uploads tracking");
+      initDatabase();
+    }
+  });
+} catch (err) {
+  console.error("Failed to initialize database:", err);
+  process.exit(1);
+}
+
+function initDatabase() {
+  const sql = `CREATE TABLE IF NOT EXISTS file_uploads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_number TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    file_type TEXT,
+    file_size INTEGER,
+    uploaded_by TEXT,
+    UNIQUE(order_number, file_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_order_number ON file_uploads(order_number);
+  CREATE INDEX IF NOT EXISTS idx_upload_date ON file_uploads(upload_date);`;
+
+  db.exec(sql, (err) => {
+    if (err) {
+      console.error("Error creating tables:", err.message);
+    } else {
+      console.log("Database tables created successfully");
+    }
+  });
+}
 
 // ── Supabase Configuration ──────────────────────────────────────
 // Set SUPABASE_URL and SUPABASE_KEY as environment variables,
@@ -78,12 +120,12 @@ function supabaseFetch(url, options) {
       res.on("end", () => resolve({ status: res.statusCode, body: data }));
     });
     req.on("error", reject);
-    if (options.body) req.write(options.body);
     if (options.headers) {
       Object.keys(options.headers).forEach(key => {
         req.setHeader(key, options.headers[key]);
       });
     }
+    if (options.body) req.write(options.body);
     req.end();
   });
 }
@@ -181,6 +223,129 @@ http.createServer((req, res) => {
   if (pathname === "/api/excel-config" && req.method === "GET") {
     const cfg = readConfig();
     sendJson(res, 200, { excelPath: cfg.excelPath || "" });
+    return;
+  }
+
+  // ── File upload to Supabase Storage ─────────────────────────
+  if (pathname === "/api/upload" && req.method === "POST") {
+    parseBody(req).then(async (body) => {
+      const cfg = readConfig();
+      const orderNumber = body.orderNumber;
+      const fileName = body.fileName;
+      const data = body.data; // base64
+      if (!orderNumber || !fileName || !data) {
+        return sendJson(res, 400, { error: "Missing orderNumber, fileName, or data" });
+      }
+      const safe = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, "_");
+      const objectPath = `${String(orderNumber)}/${safe}`;
+      const buffer = Buffer.from(data, "base64");
+      const apiUrl = `${cfg.supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${objectPath}`;
+      const result = await supabaseFetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "apikey": cfg.supabaseKey,
+          "Authorization": "Bearer " + cfg.supabaseKey
+        },
+        body: buffer
+      });
+      if (result.status >= 400) {
+        sendJson(res, 500, { error: "Storage error: " + result.status + " " + result.body });
+      } else {
+        const fileType = fileName.split(".").pop() || "unknown";
+        const fileSize = Buffer.byteLength(buffer);
+        
+        db.run(
+          "INSERT INTO file_uploads (order_number, file_name, storage_path, file_type, file_size) VALUES (?, ?, ?, ?, ?)",
+          [orderNumber, safe, objectPath, fileType, fileSize],
+          function(err) {
+            if (err) {
+              sendJson(res, 500, { error: "Database error: " + err.message });
+            } else {
+              sendJson(res, 200, { fileName: safe });
+            }
+          }
+        );
+      }
+    }).catch(e => sendJson(res, 400, { error: e.message }));
+    return;
+  }
+
+  // ── List files from Supabase Storage ────────────────────────
+  if (pathname === "/api/files" && req.method === "GET") {
+    const orderNumber = parsed.query.orderNumber;
+    if (!orderNumber) return sendJson(res, 400, { error: "Missing orderNumber" });
+    const cfg = readConfig();
+    const apiUrl = `${cfg.supabaseUrl}/storage/v1/object/list/${STORAGE_BUCKET}`;
+    supabaseFetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": cfg.supabaseKey,
+        "Authorization": "Bearer " + cfg.supabaseKey
+      },
+      body: JSON.stringify({ prefix: String(orderNumber) + "/", limit: 100, offset: 0 })
+    }).then(result => {
+      if (result.status >= 400) { sendJson(res, 200, []); return; }
+      let items;
+      try { items = JSON.parse(result.body); } catch { items = []; }
+      const files = Array.isArray(items)
+        ? items.map(i => i.name?.replace(String(orderNumber) + "/", "")).filter(Boolean)
+        : [];
+      sendJson(res, 200, files);
+    }).catch(e => sendJson(res, 500, { error: e.message }));
+    return;
+  }
+
+  // ── Get file upload history from SQLite ──────────────────────
+  if (pathname === "/api/file-history" && req.method === "GET") {
+    const orderNumber = parsed.query.orderNumber;
+    if (!orderNumber) return sendJson(res, 400, { error: "Missing orderNumber" });
+    
+    db.all(
+      "SELECT id, file_name, upload_date, file_type, file_size FROM file_uploads WHERE order_number = ? ORDER BY upload_date DESC",
+      [orderNumber],
+      (err, rows) => {
+        if (err) {
+          sendJson(res, 500, { error: "Database error: " + err.message });
+        } else {
+          sendJson(res, 200, rows || []);
+        }
+      }
+    );
+    return;
+  }
+
+  // ── Delete file from Supabase Storage ───────────────────────
+  if (pathname === "/api/files" && req.method === "DELETE") {
+    parseBody(req).then(async (body) => {
+      const cfg = readConfig();
+      const orderNumber = body.orderNumber;
+      const fileName = body.fileName;
+      if (!orderNumber || !fileName) return sendJson(res, 400, { error: "Missing orderNumber or fileName" });
+      const objectPath = `${String(orderNumber)}/${path.basename(fileName)}`;
+      const apiUrl = `${cfg.supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}`;
+      const result = await supabaseFetch(apiUrl, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": cfg.supabaseKey,
+          "Authorization": "Bearer " + cfg.supabaseKey
+        },
+        body: JSON.stringify({ prefixes: [objectPath] })
+      });
+      sendJson(res, 200, { ok: true });
+    }).catch(e => sendJson(res, 400, { error: e.message }));
+    return;
+  }
+
+  // ── Redirect to Supabase Storage public URL ─────────────────
+  if (pathname.startsWith("/uploads/")) {
+    const cfg = readConfig();
+    const relPath = pathname.slice("/uploads/".length);
+    const publicUrl = `${cfg.supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${relPath}`;
+    res.writeHead(302, { Location: publicUrl });
+    res.end();
     return;
   }
 

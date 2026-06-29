@@ -52,6 +52,7 @@
         <button class="nav-item" data-view="jobbuilds" type="button"><span class="nav-icon">▣</span>Job Builds</button>
         <button class="nav-item" data-view="orders" type="button"><span class="nav-icon">≡</span>Orders</button>
         <button class="nav-item" data-view="permissions" type="button"><span class="nav-icon">◉</span>Permissions</button>
+        <button class="nav-item" data-view="activity" type="button"><span class="nav-icon">◉</span>Activity</button>
       </nav>
 
       <div class="sidebar-panel">
@@ -286,6 +287,7 @@
                   <th data-col="jobbuilds">Job Builds</th>
                   <th data-col="orders">Orders</th>
                   <th data-col="permissions">Permissions</th>
+                  <th data-col="activity">Activity</th>
                   <th></th>
                 </tr>
               </thead>
@@ -311,6 +313,7 @@
             <label class="chip"><input type="checkbox" value="jobbuilds" checked> Job Builds</label>
             <label class="chip"><input type="checkbox" value="orders" checked> Orders</label>
             <label class="chip"><input type="checkbox" value="permissions"> Permissions</label>
+            <label class="chip"><input type="checkbox" value="activity" checked> Activity</label>
           </div>
           <div class="settings-actions">
             <button class="primary-button" id="save-new-user-btn" type="button">Save User</button>
@@ -319,10 +322,26 @@
         </div>
       </section>
 
+      <section class="view" id="activity-view" aria-labelledby="activity-title">
+        <div class="section-toolbar">
+          <div>
+            <h2 id="activity-title">Activity Log</h2>
+            <p>All user actions across the app.</p>
+          </div>
+          <button class="text-button" id="clear-activity-log-btn" type="button" style="color:var(--coral);">Clear Log</button>
+        </div>
+        <section class="panel">
+          <div id="global-activity-log" style="max-height:calc(100vh - 260px);overflow-y:auto;"></div>
+        </section>
+      </section>
+
     </main>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="context-menu" id="context-menu" style="display:none;position:fixed;z-index:1000;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:140px;">
+    <button class="context-menu-item" id="context-delete-file" type="button" style="display:flex;align-items:center;gap:8px;width:100%;padding:6px 12px;border:none;background:none;cursor:pointer;font-size:13px;color:var(--danger);border-radius:4px;">🗑 Delete File</button>
+  </div>
 
   <div class="side-panel-backdrop" id="side-panel-backdrop"></div>
   <aside class="side-panel" id="product-detail-panel">
@@ -351,10 +370,17 @@
         <h3>Related Orders</h3>
         <div id="detail-orders-list" class="orders-list"></div>
       </div>
-      <div class="detail-section" id="detail-notes-section" style="display:none;">
-        <h3>Notes</h3>
+      <div class="detail-section" id="detail-activity-section" style="display:none;">
+        <h3>Notes &amp; Files</h3>
         <textarea id="detail-order-notes" class="notes-textarea" placeholder="Add notes about this order..." style="width:100%;min-height:80px;resize:vertical;"></textarea>
-        <button id="save-order-notes" class="primary-button" type="button" style="margin-top:8px;width:100%;">Save Notes</button>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+          <button id="save-order-notes" class="primary-button" type="button" style="white-space:nowrap;font-size:12px;padding:4px 10px;height:30px;width:auto;flex-shrink:0;">Save Text</button>
+          <div style="flex:1;"></div>
+          <label for="detail-file-input" id="upload-file-btn" class="primary-button" style="white-space:nowrap;flex-shrink:0;cursor:pointer;min-height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;">Upload</label>
+          <input id="detail-file-input" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;">
+        </div>
+        <div id="detail-files-list" class="files-list" style="margin-top:8px;"></div>
+        <div id="order-activity-log" style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px;max-height:200px;overflow-y:auto;"></div>
       </div>
     </div>
   </aside>
@@ -385,8 +411,33 @@
       <span id="settings-user-name"></span>
       <button class="text-button" id="settings-signout-btn" type="button">Sign Out</button>
     </div>
-    <div class="settings-content"></div>
+    <div class="settings-content">
+      <section class="settings-section" id="supabase-settings-section">
+        <h3>Supabase Connection</h3>
+        <p>Configure your Supabase project URL and anon key for data storage and file uploads.</p>
+        <label>
+          <span>Project URL</span>
+          <input id="settings-supabase-url" type="text" placeholder="https://your-project.supabase.co">
+        </label>
+        <label>
+          <span>Anon Key</span>
+          <input id="settings-supabase-key" type="text" placeholder="your-anon-key">
+        </label>
+        <div class="settings-actions">
+          <button class="primary-button" id="save-supabase-config" type="button">Save</button>
+          <span id="supabase-config-status" style="font-size:13px;color:var(--muted);align-self:center;"></span>
+        </div>
+      </section>
+    </div>
   </aside>
+
+  <div class="file-preview-overlay" id="file-preview-overlay">
+    <div class="file-preview-backdrop" id="file-preview-backdrop"></div>
+    <div class="file-preview-wrapper">
+      <button class="file-preview-close" id="file-preview-close" type="button">✕</button>
+      <div id="file-preview-content"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

@@ -14,7 +14,7 @@ let loginScreenCheckTimer = null;
 
 const jobStages = ["New Order", "In Production", "In Hangout", "Ready To Ship"];
 const materialTypes = ["", "Hardwood", "Plywood", "MDF", "Other"];
-const allTabs = ["dashboard", "products", "materials", "workboard", "jobbuilds", "orders", "permissions"];
+const allTabs = ["dashboard", "products", "materials", "workboard", "jobbuilds", "orders", "permissions", "activity"];
 const titleMap = {
   dashboard: "Inventory Dashboard",
   products: "Products",
@@ -22,7 +22,8 @@ const titleMap = {
   workboard: "Product Workboard",
   jobbuilds: "Job Builds",
   orders: "Orders",
-  permissions: "Permissions"
+  permissions: "Permissions",
+  activity: "Activity Log"
 };
 
 const el = (selector) => document.querySelector(selector);
@@ -75,9 +76,11 @@ async function login(username, password) {
   applyPermissions();
   if (!isReady) { isReady = true; initApp(); }
   startSupabaseReconnection();
+  logGlobalActivity("login", `User logged in as "${username}"`);
 }
 
 function logout() {
+  logGlobalActivity("logout", `User logged out`);
   clearSession();
   if (supabaseReconnectTimer) clearTimeout(supabaseReconnectTimer);
   supabaseReconnectTimer = null;
@@ -315,6 +318,7 @@ async function replaceTable(table, rows) {
 
 async function loadFromSupabase() {
   setSyncStatus("Loading...");
+  logGlobalActivity("save", "Loading data from Supabase...");
   const [productRows, materialRows, orderRows, jobRows, jobBuildRows] = await Promise.all([
     supabaseRequest("products", { params: "?select=*&order=id.asc" }).catch(() => []),
     supabaseRequest("materials", { params: "?select=*&order=id.asc" }).catch(() => []),
@@ -740,6 +744,7 @@ function renderAll() {
   renderOrderProductSelect();
   renderOrders();
   renderJobBuilds();
+  renderGlobalActivityLog();
 }
 
 function showToast(message) {
@@ -768,7 +773,7 @@ function showProductDetailPanel(productId) {
     : "No specs set";
 
   el("#detail-orders-section").style.display = "";
-  el("#detail-notes-section").style.display = "none";
+  el("#detail-activity-section").style.display = "none";
   el("#detail-orders-list").innerHTML = "";
 
   el("#product-detail-panel").classList.add("open");
@@ -796,12 +801,255 @@ function showOrderDetailPanel(orderId) {
     : (order.customizations || "No specs set");
 
   el("#detail-orders-section").style.display = "none";
-  el("#detail-notes-section").style.display = "";
+  el("#detail-activity-section").style.display = "";
   el("#detail-order-notes").value = getLocalOrderMeta(order.orderNumber)?.notes || "";
+  el("#detail-file-input").value = "";
+  window._detailOrderNumber = order.orderNumber;
+  loadOrderFiles(order.orderNumber);
+  renderActivityLog(order.orderNumber);
 
   el("#product-detail-panel").classList.add("open");
   el("#side-panel-backdrop").classList.add("open");
 }
+
+async function loadOrderFiles(orderNumber) {
+  try {
+    const resp = await fetch(`/api/files?orderNumber=${encodeURIComponent(orderNumber)}`);
+    const files = await resp.json();
+    const list = el("#detail-files-list");
+    list.innerHTML = files.length
+      ? files.map(f => {
+          const isImage = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(f);
+          const url = `/uploads/${encodeURIComponent(orderNumber)}/${encodeURIComponent(f)}`;
+          return `<div class="file-item" data-file-name="${escapeHtml(f)}" data-file-url="${url}" data-file-isimage="${isImage}">
+            <span class="file-label-link">${escapeHtml(f)}</span>
+          </div>`;
+        }).join("")
+      : '<p class="empty-state" style="font-size:13px;">No files uploaded.</p>';
+  } catch (e) { console.error("loadOrderFiles error:", e); }
+}
+
+// ── Activity log ──────────────────────────────────────────
+function getOrderActivity(orderNumber) {
+  const meta = getLocalOrderMeta(orderNumber);
+  return meta?.activity || [];
+}
+
+function addActivityEntry(orderNumber, type, detail, dataUrl) {
+  const meta = getLocalOrderMeta(orderNumber) || {};
+  const activity = meta.activity || [];
+  const entry = {
+    user: currentUser?.username || "unknown",
+    type,
+    detail,
+    timestamp: Date.now()
+  };
+  if (dataUrl) entry.dataUrl = dataUrl;
+  activity.unshift(entry);
+  if (activity.length > 50) activity.length = 50;
+  setLocalOrderMeta(orderNumber, { ...meta, activity });
+  if (window._detailOrderNumber === orderNumber) {
+    renderActivityLog(orderNumber);
+  }
+}
+
+function renderActivityLog(orderNumber) {
+  const container = el("#order-activity-log");
+  if (!container) return;
+  const activity = getOrderActivity(orderNumber);
+  if (!activity.length) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0;">No activity yet</p>';
+    return;
+  }
+  container.innerHTML = activity.map(entry => {
+    const time = new Date(entry.timestamp);
+    const timeStr = time.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const icon = entry.type === "note" ? "\u{1F4DD}" : "\u{1F4F7}";
+    let body = "";
+    if (entry.type === "note") {
+      body = `<div style="margin-top:2px;color:var(--ink);white-space:pre-wrap;word-break:break-word;">${escapeHtml(entry.detail)}</div>`;
+    } else if (entry.type === "upload") {
+      const url = entry.dataUrl || `/uploads/${encodeURIComponent(orderNumber)}/${encodeURIComponent(entry.detail)}`;
+      const isImage = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(entry.detail);
+      body = `<div style="margin-top:2px;"><span style="color:var(--teal);cursor:pointer;text-decoration:underline;" class="file-preview-trigger" data-url="${url}" data-isimage="${isImage}">${escapeHtml(entry.detail)}</span></div>`;
+    }
+    return `<div style="display:flex;gap:8px;padding:4px 0;font-size:12px;align-items:flex-start;">
+      <span style="flex-shrink:0;">${icon}</span>
+      <div style="flex:1;min-width:0;">
+        <strong style="color:var(--ink);display:block;margin-bottom:4px;">${escapeHtml(entry.user)}</strong>
+        ${body}
+      </div>
+      <span style="flex-shrink:0;color:var(--muted);font-size:11px;white-space:nowrap;">${timeStr}</span>
+    </div>`;
+  }).join("");
+}
+
+// ── Global activity log ──────────────────────
+let activityLog = [];
+
+function loadActivityLog() {
+  try {
+    const raw = localStorage.getItem("app_activity_log");
+    if (raw) activityLog = JSON.parse(raw);
+  } catch { activityLog = []; }
+}
+
+function saveActivityLog() {
+  try {
+    if (activityLog.length > 500) activityLog = activityLog.slice(0, 500);
+    localStorage.setItem("app_activity_log", JSON.stringify(activityLog));
+  } catch {}
+}
+
+function logGlobalActivity(action, detail, meta = {}) {
+  const entry = {
+    timestamp: Date.now(),
+    user: currentUser?.username || "unknown",
+    action,
+    detail,
+    ...meta
+  };
+  activityLog.unshift(entry);
+  saveActivityLog();
+  renderGlobalActivityLog();
+}
+
+function renderGlobalActivityLog() {
+  const container = el("#global-activity-log");
+  if (!container) return;
+  const showAll = el("#activity-view")?.classList.contains("active");
+  const recent = showAll ? activityLog : activityLog.slice(0, 20);
+  if (!recent.length) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0;">No activity yet</p>';
+    return;
+  }
+  container.innerHTML = recent.map(entry => {
+    const time = new Date(entry.timestamp);
+    const timeStr = time.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const iconMap = { edit: "\u270F\uFE0F", add: "\u2795", delete: "\u274C", move: "\u27A1\uFE0F", create: "\u2795", login: "\uD83D\uDD11", logout: "\uD83D\uDEAA", upload: "\uD83D\uDCE4", save: "\uD83D\uDCBE" };
+    const icon = iconMap[entry.action] || "\uD83D\uDD35";
+    return `<div style="display:flex;gap:8px;padding:4px 0;font-size:12px;align-items:flex-start;">
+      <span style="flex-shrink:0;">${icon}</span>
+      <div style="flex:1;min-width:0;">
+        <strong style="color:var(--ink);display:block;margin-bottom:2px;">${escapeHtml(entry.user)}</strong>
+        <span style="color:var(--text-muted);word-break:break-word;">${escapeHtml(entry.detail)}</span>
+      </div>
+      <span style="flex-shrink:0;color:var(--muted);font-size:11px;white-space:nowrap;">${timeStr}</span>
+    </div>`;
+  }).join("");
+}
+
+// ── File preview ──────────────────────────
+document.addEventListener("click", (event) => {
+  const fileItem = event.target.closest(".file-item");
+  const trigger = event.target.closest(".file-preview-trigger");
+  if (fileItem) {
+    const url = fileItem.dataset.fileUrl;
+    const isImage = fileItem.dataset.fileIsimage === "true";
+    if (url && isImage) {
+      openFilePreview(url);
+    }
+    return;
+  }
+  if (trigger) {
+    const url = trigger.dataset.url;
+    const isImage = trigger.dataset.isimage === "true";
+    if (url && isImage) {
+      openFilePreview(url);
+    }
+    return;
+  }
+  if (event.target.closest("#file-preview-overlay") && !event.target.closest("#file-preview-content")) {
+    closeFilePreview();
+  }
+});
+
+function openFilePreview(url) {
+  const overlay = el("#file-preview-overlay");
+  const content = el("#file-preview-content");
+  if (!overlay || !content) return;
+  content.innerHTML = `<img src="${url}" style="max-width:90vw;max-height:85vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,0.3);">`;
+  overlay.classList.add("open");
+}
+
+function closeFilePreview() {
+  const overlay = el("#file-preview-overlay");
+  if (overlay) overlay.classList.remove("open");
+}
+
+// ── File upload ──────────────────────────
+(function() {
+  const input = el("#detail-file-input");
+  if (!input) { console.error("Upload input not found"); return; }
+  input.addEventListener("change", async (event) => {
+    try {
+      const file = event.target.files[0];
+      if (!file) { showToast("No file selected"); return; }
+      const orderNumber = window._detailOrderNumber;
+      if (!orderNumber) { showToast("No order selected"); return; }
+      showToast("Uploading " + file.name + "...");
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(",")[1];
+      const resp = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderNumber, fileName: file.name, data: base64 })
+      });
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        showToast("Upload failed: " + (errText || resp.status));
+        return;
+      }
+      event.target.value = "";
+      addActivityEntry(orderNumber, "upload", file.name, dataUrl);
+      logGlobalActivity("upload", `Uploaded file "${file.name}" for order #${orderNumber}`);
+      await loadOrderFiles(orderNumber);
+      showToast("File uploaded");
+    } catch (err) {
+      showToast("Error: " + (err.message || "unknown"));
+    }
+  });
+})();
+
+let _contextFile = null;
+
+el("#detail-files-list").addEventListener("contextmenu", (event) => {
+  const filePreview = event.target.closest("[data-file-name]");
+  if (!filePreview) return;
+  event.preventDefault();
+  _contextFile = filePreview.dataset.fileName;
+  const menu = el("#context-menu");
+  menu.style.display = "block";
+  menu.style.left = event.clientX + "px";
+  menu.style.top = event.clientY + "px";
+});
+
+document.addEventListener("click", () => {
+  el("#context-menu").style.display = "none";
+  _contextFile = null;
+});
+
+el("#context-delete-file").addEventListener("click", async () => {
+  const fileName = _contextFile;
+  const orderNumber = window._detailOrderNumber;
+  el("#context-menu").style.display = "none";
+  _contextFile = null;
+  if (!orderNumber || !fileName) return;
+  try {
+    await fetch("/api/files", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderNumber, fileName })
+    });
+    loadOrderFiles(orderNumber);
+    showToast("File deleted");
+  } catch { showToast("Delete failed"); }
+});
 
 function showJobBuildDetailPanel(buildId) {
   const build = jobBuilds.find((item) => item.id === buildId);
@@ -812,7 +1060,7 @@ function showJobBuildDetailPanel(buildId) {
   el("#detail-name").textContent = `Job Build ${build.buildNumber}`;
   el("#detail-qty").textContent = build.productCount || "0";
   el("#detail-orders-section").style.display = "";
-  el("#detail-notes-section").style.display = "none";
+  el("#detail-activity-section").style.display = "none";
   el("#detail-materials-chips").innerHTML = `<span class="chip">${buildOrders.length} orders</span><span class="chip">${escapeHtml(build.stage || "New Task")}</span>`;
   el("#detail-orders-list").innerHTML = buildOrders.length > 0 ? buildOrders.map((order) => `
     <div class="order-detail-item" data-build-order="${order.id}" style="cursor:pointer;">
@@ -921,12 +1169,14 @@ document.addEventListener("click", (event) => {
     if (type === "order") {
       const order = orders.find(o => o.id === id);
       if (!order) return;
+      const prevStage = order.stage;
       const nextIndex = jobStages.indexOf(order.stage) + direction;
       if (jobStages[nextIndex]) {
         order.stage = jobStages[nextIndex];
         setLocalOrderMeta(order.orderNumber, { stage: order.stage });
         renderAll();
         scheduleAutoSave(`order:${order.id}`, () => upsertRow("orders", orderToDb(order)));
+        logGlobalActivity("move", `Moved order #${order.orderNumber} from "${prevStage}" to "${order.stage}"`);
       }
     } else if (type === "build") {
       const build = jobBuilds.find(b => b.id === id);
@@ -934,6 +1184,7 @@ document.addEventListener("click", (event) => {
       const currentIndex = jobStages.indexOf(build.stage);
       const nextIndex = currentIndex + direction;
       if (jobStages[nextIndex]) {
+        const prevStage = build.stage;
         const targetStage = jobStages[nextIndex];
         build.stage = targetStage;
         const buildOrders = getOrdersForBuild(build.buildNumber);
@@ -945,15 +1196,18 @@ document.addEventListener("click", (event) => {
             await upsertRow("orders", orderToDb(order));
           }
         });
+        logGlobalActivity("move", `Moved build "${build.buildNumber}" from "${prevStage}" to "${targetStage}"`);
       }
     } else {
       const job = jobs.find(j => j.id === id);
       if (!job) return;
+      const prevStage = job.stage;
       const nextIndex = jobStages.indexOf(job.stage) + direction;
       if (jobStages[nextIndex]) {
         job.stage = jobStages[nextIndex];
         renderAll();
         scheduleAutoSave(`job:${job.id}`, () => upsertRow("jobs", jobToDb(job)));
+        logGlobalActivity("move", `Moved job for product to "${job.stage}"`);
       }
     }
   }
@@ -1005,6 +1259,7 @@ el("#confirm-create-build").addEventListener("click", () => {
       if (order) await upsertRow("orders", orderToDb(order));
     }
   });
+  logGlobalActivity("create", `Created job build "${buildName}" with ${checkedIds.length} orders`);
   showToast(`Job Build created: ${buildName}`);
 });
 
@@ -1019,12 +1274,14 @@ el("#add-product-row-btn").addEventListener("click", () => {
   const product = { id: uniqueId(), name: "", qtyMade: "", selectedMaterials: [], buildSpecs: [] };
   products.push(product);
   renderAll();
+  logGlobalActivity("add", `Added new product row`);
 });
 
 el("#add-material-row-btn").addEventListener("click", () => {
   const material = { id: uniqueId(), woodName: "", thickness: "", type: "", qty: "", lowStockThreshold: "" };
   materials.push(material);
   renderAll();
+  logGlobalActivity("add", `Added new material row`);
 });
 
 el("#material-sheet-body").addEventListener("input", (event) => {
@@ -1032,12 +1289,15 @@ el("#material-sheet-body").addEventListener("input", (event) => {
   if (!input) return;
   const row = input.closest("[data-material-row]");
   const material = materials.find((item) => item.id === Number(row.dataset.materialRow));
-  material[input.dataset.materialField] = input.value;
+  const field = input.dataset.materialField;
+  const fieldLabels = { woodName: "Name", thickness: "Thickness", type: "Type", qty: "Qty", lowStockThreshold: "Low Stock Threshold" };
+  material[field] = input.value;
   renderAlerts();
   scheduleAutoSave(`material:${material.id}`, () => {
     const hasContent = material.woodName || material.thickness || material.type || material.qty || material.lowStockThreshold;
     return hasContent ? upsertRow("materials", materialToDb(material)) : deleteRow("materials", material.id);
   });
+  logGlobalActivity("edit", `Edited material ${fieldLabels[field] || field}`, { materialId: material.id });
 });
 
 el("#product-list-container").addEventListener("input", (event) => {
@@ -1045,7 +1305,9 @@ el("#product-list-container").addEventListener("input", (event) => {
   if (input) {
     const row = input.closest("[data-product-row]");
     const product = products.find((item) => item.id === Number(row.dataset.productRow));
-    product[input.dataset.productField] = input.value;
+    const field = input.dataset.productField;
+    const fieldLabels = { name: "Name", qtyMade: "Qty Made" };
+    product[field] = input.value;
 
     const hasJob = jobs.some((job) => job.productId === product.id);
     if (product.name.trim() && !hasJob) {
@@ -1070,6 +1332,7 @@ el("#product-list-container").addEventListener("input", (event) => {
       await deleteJobsForProduct(product.id);
       await deleteRow("products", product.id);
     });
+    logGlobalActivity("edit", `Edited product ${fieldLabels[field] || field}`, { productId: product.id });
     return;
   }
 
@@ -1079,16 +1342,19 @@ el("#product-list-container").addEventListener("input", (event) => {
     const product = products.find((item) => item.id === Number(row.dataset.productRow));
     const materialId = Number(checkbox.dataset.materialCheckbox);
     const qtyInput = row.querySelector(`[data-material-qty="${materialId}"]`);
+    const material = materials.find(m => m.id === materialId);
 
     if (checkbox.checked) {
       if (!product.selectedMaterials.find(sm => sm.materialId === materialId)) {
         product.selectedMaterials.push({ materialId, qty: "" });
       }
       qtyInput.disabled = false;
+      logGlobalActivity("edit", `Added material "${material?.woodName || materialId}" to product "${product.name || "Untitled"}"`);
     } else {
       product.selectedMaterials = product.selectedMaterials.filter(sm => sm.materialId !== materialId);
       qtyInput.disabled = true;
       qtyInput.value = "";
+      logGlobalActivity("edit", `Removed material "${material?.woodName || materialId}" from product "${product.name || "Untitled"}"`);
     }
 
     renderProducts();
@@ -1153,6 +1419,7 @@ el("#product-list-container").addEventListener("click", (event) => {
       input.value = "";
       renderProducts();
       scheduleAutoSave(`product:${product.id}`, () => upsertRow("products", productToDb(product)));
+      logGlobalActivity("add", `Added task "${task}" to product "${product.name || "Untitled"}" in stage "${stage}"`);
     }
     return;
   }
@@ -1173,6 +1440,7 @@ el("#product-list-container").addEventListener("keydown", (event) => {
     input.value = "";
     renderProducts();
     scheduleAutoSave(`product:${product.id}`, () => upsertRow("products", productToDb(product)));
+    logGlobalActivity("add", `Added task "${task}" to product "${product.name || "Untitled"}" in stage "${stage}"`);
   }
 });
 
@@ -1230,6 +1498,7 @@ el("#create-order-btn").addEventListener("click", () => {
   scheduleAutoSave(`order:${order.id}`, async () => {
     await upsertRow("orders", orderToDb(order));
   });
+  logGlobalActivity("create", `Created order #${orderNumber} for "${product.name}" (qty: ${qty || "1"})`);
   showToast("Order created.");
 });
 
@@ -1241,21 +1510,24 @@ el("#orders-table").addEventListener("click", (event) => {
   const orderId = Number(deleteBtn.dataset.deleteOrder);
   const order = orders.find((o) => o.id === orderId);
   if (!order) return;
+  const orderNum = order.orderNumber;
   orders = orders.filter((o) => o.id !== orderId);
   renderAll();
   scheduleAutoSave(`delete:order:${orderId}`, async () => {
     await supabaseRequest("orders", {
       method: "DELETE",
-      params: `?order_number=eq.${encodeURIComponent(order.orderNumber)}`,
+      params: `?order_number=eq.${encodeURIComponent(orderNum)}`,
       prefer: "return=minimal"
     });
   });
+  logGlobalActivity("delete", `Deleted order #${orderNum}`);
   showToast("Order deleted.");
 });
 
 function onOrderTaskToggle(orderId, idx, done) {
   const order = orders.find(o => o.id === orderId);
   if (!order) return;
+  const taskName = order.buildSpecs?.[idx]?.task || "";
   if (order.buildSpecs && order.buildSpecs[idx]) {
     order.buildSpecs[idx].done = done;
   }
@@ -1271,6 +1543,7 @@ function onOrderTaskToggle(orderId, idx, done) {
 
   renderAll();
   scheduleAutoSave(`order:${order.id}`, () => upsertRow("orders", orderToDb(order)));
+  logGlobalActivity("edit", `${done ? "Completed" : "Uncompleted"} task "${taskName}" on order #${order.orderNumber}`);
 }
 
 el("#product-detail-panel").addEventListener("change", (event) => {
@@ -1326,6 +1599,41 @@ el("#settings-btn").addEventListener("click", () => {
   el("#settings-panel").classList.add("open");
   el("#settings-backdrop").classList.add("open");
   el("#settings-user-name").textContent = currentUser ? currentUser.username : "";
+  // Load current Supabase config into settings fields
+  const urlInput = el("#settings-supabase-url");
+  const keyInput = el("#settings-supabase-key");
+  if (urlInput && keyInput) {
+    urlInput.value = supabaseConfig.url || "";
+    keyInput.value = supabaseConfig.key || "";
+  }
+});
+
+el("#save-supabase-config")?.addEventListener("click", async () => {
+  const urlInput = el("#settings-supabase-url");
+  const keyInput = el("#settings-supabase-key");
+  const statusEl = el("#supabase-config-status");
+  const url = urlInput.value.trim();
+  const key = keyInput.value.trim();
+  if (!url || !key) { statusEl.textContent = "Both fields required"; return; }
+  try {
+    const resp = await fetch("/api/excel-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supabaseUrl: url, supabaseKey: key })
+    });
+    if (!resp.ok) throw new Error("Save failed");
+    supabaseConfig.url = url.replace(/\/$/, "");
+    supabaseConfig.key = key;
+    statusEl.textContent = "Saved — reconnecting...";
+    setTimeout(() => {
+      ensureSupabaseConnection().then(() => {
+        statusEl.textContent = "";
+        setSyncStatus("Connected");
+        loadFromSupabase().catch(() => setSyncStatus("Load failed"));
+      });
+    }, 300);
+    logGlobalActivity("save", "Updated Supabase configuration");
+  } catch { statusEl.textContent = "Save failed"; }
 });
 
 el("#settings-signout-btn").addEventListener("click", () => {
@@ -1350,6 +1658,8 @@ el("#save-order-notes").addEventListener("click", () => {
   const notes = el("#detail-order-notes").value.trim();
   order.notes = notes;
   setLocalOrderMeta(order.orderNumber, { notes });
+  addActivityEntry(order.orderNumber, "note", notes);
+  logGlobalActivity("save", `Saved notes on order #${orderNumber}`);
   showToast("Notes saved");
 });
 
@@ -1402,6 +1712,7 @@ el("#permissions-table-body")?.addEventListener("change", async (e) => {
       saveSession(currentUser);
       applyPermissions();
     }
+    logGlobalActivity("edit", `Updated permissions for user "${username}"`);
   } catch { showToast("Failed to update permissions"); }
 });
 
@@ -1423,6 +1734,7 @@ el("#permissions-table-body")?.addEventListener("click", async (e) => {
   try {
     await removeUser(username);
     await renderPermissions();
+    logGlobalActivity("delete", `Deleted user "${username}"`);
     showToast("User deleted");
   } catch { showToast("Failed to delete user"); }
 });
@@ -1449,15 +1761,25 @@ el("#save-new-user-btn")?.addEventListener("click", async () => {
     el("#new-user-username").value = "";
     el("#new-user-password").value = "";
     await renderPermissions();
+    logGlobalActivity("create", `Created user "${username}"`);
     showToast("User created");
   } catch { showToast("Failed to create user"); }
 });
 
-// Trigger permissions render when switching to permissions view
+el("#clear-activity-log-btn")?.addEventListener("click", () => {
+  if (!confirm("Clear all activity log entries?")) return;
+  activityLog = [];
+  saveActivityLog();
+  renderGlobalActivityLog();
+  showToast("Activity log cleared");
+});
+
+// Trigger renders when switching views
 const origSwitchView = switchView;
 switchView = function(view) {
   origSwitchView(view);
   if (view === "permissions") renderPermissions();
+  if (view === "activity") renderGlobalActivityLog();
 };
 
 function initColumnResize() {
@@ -1502,6 +1824,7 @@ function initColumnResize() {
 // Escape key closes panels
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (el("#file-preview-overlay")?.classList.contains("open")) { closeFilePreview(); return; }
     if (el("#settings-panel").classList.contains("open")) { closeSettings(); return; }
     if (el("#product-detail-panel").classList.contains("open")) { closeProductDetailPanel(); return; }
   }
@@ -1570,6 +1893,7 @@ function initApp() {
 async function initializeApp() {
   const connected = await loadSupabaseConfig();
   loadSession();
+  loadActivityLog();
   setSyncStatus(isConnected() ? "Connected" : "Not connected");
   if (currentUser) {
     el("#login-overlay").classList.add("hidden");

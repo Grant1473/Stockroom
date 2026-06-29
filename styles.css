@@ -1227,7 +1227,7 @@ th {
   position: fixed;
   right: 22px;
   bottom: 22px;
-  z-index: 10;
+  z-index: 1001;
   transform: translateY(20px);
   opacity: 0;
   pointer-events: none;
@@ -1863,6 +1863,112 @@ th {
 .add-task-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
 .add-task-row input { flex: 1; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
 .add-task-row select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+
+.files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.file-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: var(--backdrop);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.file-preview:hover {
+  border-color: var(--teal);
+}
+.file-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.file-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.file-label {
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-menu-item:hover {
+  background: var(--backdrop);
+}
+
+/* File list item (name only, no thumbnail) */
+.file-item {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--backdrop);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.file-item:hover {
+  border-color: var(--teal);
+  background: var(--paper);
+}
+.file-label-link {
+  font-size: 13px;
+  color: var(--teal);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* File preview overlay */
+.file-preview-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.file-preview-overlay.open {
+  opacity: 1; pointer-events: auto;
+}
+.file-preview-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.7);
+}
+.file-preview-wrapper {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 2;
+}
 
 @media (max-width: 768px) {
   .side-panel {
